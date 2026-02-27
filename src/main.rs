@@ -1,5 +1,7 @@
 mod document;
+mod engine;
 mod parser;
+mod rules;
 mod server;
 
 use server::WcagLspServer;
