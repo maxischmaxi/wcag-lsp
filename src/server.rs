@@ -2,6 +2,8 @@ use crate::config::Config;
 use crate::document::DocumentManager;
 use crate::engine;
 use crate::rules::{self, Rule};
+use glob_match::glob_match;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp_server::jsonrpc::Result;
@@ -12,7 +14,8 @@ pub struct WcagLspServer {
     pub client: Client,
     pub documents: Arc<RwLock<DocumentManager>>,
     pub config: Arc<RwLock<Config>>,
-    pub rules: Vec<Box<dyn Rule>>,
+    pub rules: Arc<Vec<Box<dyn Rule>>>,
+    pub debounce_versions: Arc<RwLock<HashMap<String, i32>>>,
 }
 
 impl WcagLspServer {
@@ -21,13 +24,29 @@ impl WcagLspServer {
             client,
             documents: Arc::new(RwLock::new(DocumentManager::new())),
             config: Arc::new(RwLock::new(Config::default())),
-            rules: rules::all_rules(),
+            rules: Arc::new(rules::all_rules()),
+            debounce_versions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     async fn diagnose(&self, uri: Uri, version: Option<i32>) {
-        let docs = self.documents.read().await;
         let config = self.config.read().await;
+
+        // Check ignore patterns
+        if let Some(file_path) = uri.to_file_path() {
+            let path_str = file_path.to_string_lossy();
+            for pattern in &config.ignore_patterns {
+                if glob_match(pattern, &path_str) {
+                    drop(config);
+                    self.client
+                        .publish_diagnostics(uri, vec![], version)
+                        .await;
+                    return;
+                }
+            }
+        }
+
+        let docs = self.documents.read().await;
         let uri_str = uri.to_string();
         let diagnostics = if let Some(doc) = docs.get(&uri_str) {
             engine::run_diagnostics(doc, &self.rules, &config)
@@ -97,11 +116,64 @@ impl LanguageServer for WcagLspServer {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
         if let Some(change) = params.content_changes.into_iter().last() {
+            let uri_str = uri.to_string();
+
             let mut docs = self.documents.write().await;
-            docs.update(&uri.to_string(), change.text, version);
+            docs.update(&uri_str, change.text, version);
             drop(docs);
 
-            self.diagnose(uri, Some(version)).await;
+            // Store current version for debounce
+            {
+                let mut versions = self.debounce_versions.write().await;
+                versions.insert(uri_str.clone(), version);
+            }
+
+            // Clone Arcs for the spawned task
+            let debounce_versions = self.debounce_versions.clone();
+            let documents = self.documents.clone();
+            let config = self.config.clone();
+            let client = self.client.clone();
+            let rules = self.rules.clone();
+
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+                // Check if this version is still current
+                let current_version = {
+                    let versions = debounce_versions.read().await;
+                    versions.get(&uri_str).copied()
+                };
+
+                if current_version != Some(version) {
+                    return; // A newer version came in, skip
+                }
+
+                // Check ignore patterns
+                let cfg = config.read().await;
+                if let Some(file_path) = uri.to_file_path() {
+                    let path_str = file_path.to_string_lossy();
+                    for pattern in &cfg.ignore_patterns {
+                        if glob_match(pattern, &path_str) {
+                            drop(cfg);
+                            client.publish_diagnostics(uri, vec![], Some(version)).await;
+                            return;
+                        }
+                    }
+                }
+
+                // Run diagnostics
+                let docs = documents.read().await;
+                let diagnostics = if let Some(doc) = docs.get(&uri_str) {
+                    engine::run_diagnostics(doc, &rules, &cfg)
+                } else {
+                    vec![]
+                };
+                drop(docs);
+                drop(cfg);
+                client
+                    .publish_diagnostics(uri, diagnostics, Some(version))
+                    .await;
+            });
         }
     }
 
