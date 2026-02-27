@@ -70,8 +70,6 @@ Add to `.vscode/settings.json`:
 }
 ```
 
-Or use a generic LSP client extension (e.g. [vscode-lsp-client](https://marketplace.visualstudio.com/items?itemName=AGerusworker.vscode-lsp-client)).
-
 ## Configuration
 
 Create a `.wcag-lsp.toml` file in your project root. All sections are optional -- without a config file, the default settings apply.
