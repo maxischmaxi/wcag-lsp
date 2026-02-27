@@ -3,11 +3,15 @@ use tower_lsp_server::ls_types::Diagnostic;
 use tree_sitter::Node;
 
 pub mod anchor_content;
+pub mod aria_props;
+pub mod aria_role;
 pub mod click_events;
 pub mod form_label;
 pub mod heading_order;
 pub mod html_lang;
+pub mod iframe_title;
 pub mod img_alt;
+pub mod tabindex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WcagLevel {
@@ -39,10 +43,14 @@ pub trait Rule: Send + Sync {
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(anchor_content::AnchorContent),
+        Box::new(aria_props::AriaProps),
+        Box::new(aria_role::AriaRole),
         Box::new(click_events::ClickEvents),
         Box::new(form_label::FormLabel),
         Box::new(heading_order::HeadingOrder),
         Box::new(html_lang::HtmlLang),
+        Box::new(iframe_title::IframeTitle),
         Box::new(img_alt::ImgAlt),
+        Box::new(tabindex::Tabindex),
     ]
 }
