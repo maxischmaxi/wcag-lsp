@@ -2,6 +2,8 @@ use crate::parser::FileType;
 use tower_lsp_server::ls_types::Diagnostic;
 use tree_sitter::Node;
 
+pub mod heading_order;
+pub mod html_lang;
 pub mod img_alt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +35,8 @@ pub trait Rule: Send + Sync {
 
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
+        Box::new(heading_order::HeadingOrder),
+        Box::new(html_lang::HtmlLang),
         Box::new(img_alt::ImgAlt),
     ]
 }
