@@ -14,6 +14,28 @@ Built with Rust and [tree-sitter](https://tree-sitter.github.io/) for incrementa
 
 ## Installation
 
+### Quick install (Linux / macOS)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxischmaxi/wcag-lsp/main/install.sh | sh
+```
+
+Installs to `~/.local/bin`. Override with `WCAG_LSP_INSTALL_DIR`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxischmaxi/wcag-lsp/main/install.sh | WCAG_LSP_INSTALL_DIR=/usr/local/bin sh
+```
+
+Install a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxischmaxi/wcag-lsp/main/install.sh | sh -s v0.1.0
+```
+
+### Windows
+
+Download `wcag-lsp-x86_64-pc-windows-msvc.zip` from the [latest release](https://github.com/maxischmaxi/wcag-lsp/releases/latest), extract it, and add the directory to your `PATH`.
+
 ### From source
 
 ```sh
