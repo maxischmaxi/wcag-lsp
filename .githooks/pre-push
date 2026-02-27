@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+echo "Running pre-push checks..."
+
+echo "  cargo fmt --check"
+cargo fmt -- --check
+
+echo "  cargo clippy"
+cargo clippy -- -D warnings
+
+echo "  cargo test"
+cargo test --locked
+
+echo "All checks passed."

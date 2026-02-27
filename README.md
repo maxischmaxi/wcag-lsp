@@ -169,6 +169,14 @@ All rules are WCAG 2.1 Level A. Rule IDs are used in the `[rules]` config sectio
 
 - Rust 1.85+ (edition 2024)
 
+### Setup
+
+```sh
+git config core.hooksPath .githooks
+```
+
+This enables the pre-push hook that runs `cargo fmt --check`, `cargo clippy`, and `cargo test` before each push.
+
 ### Build & Test
 
 ```sh
