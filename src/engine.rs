@@ -3,7 +3,11 @@ use crate::document::Document;
 use crate::rules::{Rule, Severity};
 use tower_lsp_server::ls_types::*;
 
-pub fn run_diagnostics(doc: &Document, rules: &[Box<dyn Rule>], config: &Config) -> Vec<Diagnostic> {
+pub fn run_diagnostics(
+    doc: &Document,
+    rules: &[Box<dyn Rule>],
+    config: &Config,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for rule in rules {
         let meta = rule.metadata();

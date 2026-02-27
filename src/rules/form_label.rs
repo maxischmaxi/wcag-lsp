@@ -147,7 +147,10 @@ fn is_inside_label(node: &Node, source: &str) -> bool {
 }
 
 /// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute<'a>(attr_node: &Node, source: &'a str) -> (Option<String>, Option<String>) {
+fn extract_html_attribute<'a>(
+    attr_node: &Node,
+    source: &'a str,
+) -> (Option<String>, Option<String>) {
     let mut name = None;
     let mut value = None;
 
@@ -248,8 +251,7 @@ fn check_jsx_element(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
                     }
                 }
                 if inner_child.kind() == "jsx_attribute" {
-                    let (attr_name, attr_value) =
-                        extract_jsx_attribute(&inner_child, source);
+                    let (attr_name, attr_value) = extract_jsx_attribute(&inner_child, source);
                     if let Some(name) = attr_name {
                         if LABEL_ATTRS_JSX.iter().any(|a| *a == name) {
                             has_label = true;
@@ -303,7 +305,10 @@ fn is_inside_jsx_label(node: &Node, source: &str) -> bool {
 }
 
 /// Extract (attribute_name, Option<string_value>) from a JSX attribute node.
-fn extract_jsx_attribute<'a>(attr_node: &Node, source: &'a str) -> (Option<String>, Option<String>) {
+fn extract_jsx_attribute<'a>(
+    attr_node: &Node,
+    source: &'a str,
+) -> (Option<String>, Option<String>) {
     let mut name = None;
     let mut value = None;
 

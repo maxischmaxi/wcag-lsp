@@ -135,10 +135,7 @@ fn make_diagnostic(node: &Node) -> Diagnostic {
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String("img-alt".to_string())),
         code_description: Some(CodeDescription {
-            href: meta
-                .wcag_url
-                .parse()
-                .expect("valid URL"),
+            href: meta.wcag_url.parse().expect("valid URL"),
         }),
         source: Some("wcag-lsp".to_string()),
         message: format!(

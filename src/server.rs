@@ -38,9 +38,7 @@ impl WcagLspServer {
             for pattern in &config.ignore_patterns {
                 if glob_match(pattern, &path_str) {
                     drop(config);
-                    self.client
-                        .publish_diagnostics(uri, vec![], version)
-                        .await;
+                    self.client.publish_diagnostics(uri, vec![], version).await;
                     return;
                 }
             }

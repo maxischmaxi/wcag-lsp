@@ -104,22 +104,14 @@ mod tests {
     #[test]
     fn test_open_unknown_file_returns_none() {
         let mut mgr = DocumentManager::new();
-        let doc = mgr.open(
-            "file:///test.rs".to_string(),
-            "fn main() {}".to_string(),
-            1,
-        );
+        let doc = mgr.open("file:///test.rs".to_string(), "fn main() {}".to_string(), 1);
         assert!(doc.is_none());
     }
 
     #[test]
     fn test_update_document() {
         let mut mgr = DocumentManager::new();
-        mgr.open(
-            "file:///test.html".to_string(),
-            "<img>".to_string(),
-            1,
-        );
+        mgr.open("file:///test.html".to_string(), "<img>".to_string(), 1);
         let doc = mgr.update("file:///test.html", "<img alt=\"hi\">".to_string(), 2);
         assert!(doc.is_some());
         let doc = doc.unwrap();
@@ -130,11 +122,7 @@ mod tests {
     #[test]
     fn test_close_document() {
         let mut mgr = DocumentManager::new();
-        mgr.open(
-            "file:///test.html".to_string(),
-            "<img>".to_string(),
-            1,
-        );
+        mgr.open("file:///test.html".to_string(), "<img>".to_string(), 1);
         mgr.close("file:///test.html");
         assert!(mgr.get("file:///test.html").is_none());
     }

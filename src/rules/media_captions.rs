@@ -55,9 +55,7 @@ fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagno
             for tag_child in child.children(&mut tag_cursor) {
                 if tag_child.kind() == "tag_name" {
                     let name = &source[tag_child.byte_range()];
-                    if name.eq_ignore_ascii_case("video")
-                        || name.eq_ignore_ascii_case("audio")
-                    {
+                    if name.eq_ignore_ascii_case("video") || name.eq_ignore_ascii_case("audio") {
                         is_media = true;
                     }
                 }
@@ -113,8 +111,7 @@ fn is_caption_track_element(element: &Node, source: &str) -> bool {
                     }
                 }
                 if tag_child.kind() == "attribute" {
-                    let (attr_name, attr_value) =
-                        extract_html_attribute(&tag_child, source);
+                    let (attr_name, attr_value) = extract_html_attribute(&tag_child, source);
                     if let Some(name) = attr_name {
                         if name.eq_ignore_ascii_case("kind") {
                             if let Some(ref val) = attr_value {
@@ -218,9 +215,8 @@ mod tests {
 
     #[test]
     fn test_video_with_subtitles_passes() {
-        let diags = check_html(
-            r#"<video src="movie.mp4"><track kind="subtitles" src="subs.vtt"></video>"#,
-        );
+        let diags =
+            check_html(r#"<video src="movie.mp4"><track kind="subtitles" src="subs.vtt"></video>"#);
         assert_eq!(diags.len(), 0);
     }
 

@@ -116,10 +116,7 @@ fn make_diagnostic(node: &Node) -> Diagnostic {
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String("html-lang".to_string())),
         code_description: Some(CodeDescription {
-            href: meta
-                .wcag_url
-                .parse()
-                .expect("valid URL"),
+            href: meta.wcag_url.parse().expect("valid URL"),
         }),
         source: Some("wcag-lsp".to_string()),
         message: format!(
@@ -146,7 +143,10 @@ mod tests {
     fn test_html_without_lang() {
         let diags = check_html("<html><body></body></html>");
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, Some(NumberOrString::String("html-lang".to_string())));
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("html-lang".to_string()))
+        );
     }
 
     #[test]

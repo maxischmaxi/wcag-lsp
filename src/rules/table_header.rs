@@ -146,8 +146,7 @@ mod tests {
 
     #[test]
     fn test_table_with_th_passes() {
-        let diags =
-            check_html(r#"<table><tr><th>Header</th></tr><tr><td>Data</td></tr></table>"#);
+        let diags = check_html(r#"<table><tr><th>Header</th></tr><tr><td>Data</td></tr></table>"#);
         assert_eq!(diags.len(), 0);
     }
 
@@ -167,9 +166,8 @@ mod tests {
 
     #[test]
     fn test_multiple_tables_mixed() {
-        let diags = check_html(
-            r#"<table><tr><th>H</th></tr></table><table><tr><td>D</td></tr></table>"#,
-        );
+        let diags =
+            check_html(r#"<table><tr><th>H</th></tr></table><table><tr><td>D</td></tr></table>"#);
         assert_eq!(diags.len(), 1);
     }
 }

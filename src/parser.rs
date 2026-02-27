@@ -72,7 +72,10 @@ mod tests {
     fn test_file_type_from_uri() {
         assert_eq!(FileType::from_uri("file:///app/index.html"), FileType::Html);
         assert_eq!(FileType::from_uri("file:///app/App.tsx"), FileType::Tsx);
-        assert_eq!(FileType::from_uri("file:///app/style.css"), FileType::Unknown);
+        assert_eq!(
+            FileType::from_uri("file:///app/style.css"),
+            FileType::Unknown
+        );
     }
 
     #[test]

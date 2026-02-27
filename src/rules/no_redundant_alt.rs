@@ -184,8 +184,7 @@ fn check_jsx_opening(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
                     }
                 }
                 if inner_child.kind() == "jsx_attribute" {
-                    let (attr_name, attr_value) =
-                        extract_jsx_attribute(&inner_child, source);
+                    let (attr_name, attr_value) = extract_jsx_attribute(&inner_child, source);
                     if let Some(name) = attr_name {
                         if name == "alt" {
                             alt_value = attr_value;
