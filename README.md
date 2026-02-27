@@ -7,7 +7,7 @@ Built with Rust and [tree-sitter](https://tree-sitter.github.io/) for incrementa
 ## Features
 
 - Real-time WCAG diagnostics as you type (150ms debounce)
-- 31 rules covering WCAG 2.1/2.2 Level A and AA criteria
+- 40 rules covering WCAG 2.1/2.2 Level A and AA criteria
 - Supports HTML, JSX, TSX, Vue, Svelte, Astro, PHP, ERB, Handlebars, and Twig
 - Configurable severity levels and per-rule overrides
 - Glob-based file ignore patterns
@@ -144,7 +144,7 @@ patterns = [
 
 ## Rules
 
-wcag-lsp includes 31 rules covering WCAG 2.1/2.2 Level A and AA criteria.
+wcag-lsp includes 40 rules covering WCAG 2.1/2.2 Level A and AA criteria.
 
 See [RULES.md](RULES.md) for the complete rule reference and WCAG criterion coverage matrix.
 

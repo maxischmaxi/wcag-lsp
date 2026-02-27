@@ -4,9 +4,17 @@ use tree_sitter::Node;
 
 pub mod anchor_content;
 pub mod area_alt;
+pub mod aria_allowed_attr;
+pub mod aria_deprecated_role;
+pub mod aria_hidden_body;
+pub mod aria_hidden_focus;
+pub mod aria_prohibited_attr;
 pub mod aria_props;
 pub mod aria_required_attr;
+pub mod aria_required_children;
+pub mod aria_required_parent;
 pub mod aria_role;
+pub mod aria_valid_attr_value;
 pub mod autocomplete_valid;
 pub mod button_name;
 pub mod click_events;
@@ -22,6 +30,7 @@ pub mod list_structure;
 pub mod media_captions;
 pub mod meta_refresh;
 pub mod mouse_events;
+pub mod nested_interactive;
 pub mod no_access_key;
 pub mod no_autoplay;
 pub mod no_distracting_elements;
@@ -65,9 +74,17 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(anchor_content::AnchorContent),
         Box::new(area_alt::AreaAlt),
+        Box::new(aria_allowed_attr::AriaAllowedAttr),
+        Box::new(aria_deprecated_role::AriaDeprecatedRole),
+        Box::new(aria_hidden_body::AriaHiddenBody),
+        Box::new(aria_hidden_focus::AriaHiddenFocus),
+        Box::new(aria_prohibited_attr::AriaProhibitedAttr),
         Box::new(aria_props::AriaProps),
         Box::new(aria_required_attr::AriaRequiredAttr),
+        Box::new(aria_required_children::AriaRequiredChildren),
+        Box::new(aria_required_parent::AriaRequiredParent),
         Box::new(aria_role::AriaRole),
+        Box::new(aria_valid_attr_value::AriaValidAttrValue),
         Box::new(autocomplete_valid::AutocompleteValid),
         Box::new(button_name::ButtonName),
         Box::new(click_events::ClickEvents),
@@ -83,6 +100,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(media_captions::MediaCaptions),
         Box::new(meta_refresh::MetaRefresh),
         Box::new(mouse_events::MouseEvents),
+        Box::new(nested_interactive::NestedInteractive),
         Box::new(no_access_key::NoAccessKey),
         Box::new(no_autoplay::NoAutoplay),
         Box::new(no_distracting_elements::NoDistractingElements),

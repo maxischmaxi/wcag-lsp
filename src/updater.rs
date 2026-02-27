@@ -1,7 +1,5 @@
 use serde::Deserialize;
 use std::io::Write;
-use tower_lsp_server::Client;
-use tower_lsp_server::ls_types::MessageType;
 
 // ---------------------------------------------------------------------------
 // Error
@@ -203,10 +201,13 @@ pub fn replace_binary(binary_data: &[u8]) -> Result<(), UpdateError> {
 // Orchestration
 // ---------------------------------------------------------------------------
 
-async fn run_update(client: &Client) -> Result<(), UpdateError> {
+pub async fn self_update() -> Result<(), UpdateError> {
     let target = current_target()?;
     let expected_asset = asset_name_for_target(target);
     let local_version = env!("CARGO_PKG_VERSION");
+
+    println!("wcag-lsp v{local_version} ({target})");
+    println!("Checking for updates...");
 
     let http = reqwest::Client::builder()
         .user_agent("wcag-lsp-updater")
@@ -221,8 +222,11 @@ async fn run_update(client: &Client) -> Result<(), UpdateError> {
         .await?;
 
     if !is_newer(&release.tag_name, local_version)? {
+        println!("Already up to date.");
         return Ok(());
     }
+
+    println!("Updating to {}...", release.tag_name);
 
     let asset = release
         .assets
@@ -241,25 +245,8 @@ async fn run_update(client: &Client) -> Result<(), UpdateError> {
     let binary_data = extract_binary(&archive_bytes)?;
     replace_binary(&binary_data)?;
 
-    client
-        .show_message(
-            MessageType::INFO,
-            format!(
-                "wcag-lsp updated to {}. Please restart your editor to use the new version.",
-                release.tag_name
-            ),
-        )
-        .await;
-
+    println!("Updated to {}.", release.tag_name);
     Ok(())
-}
-
-pub async fn check_for_update(client: Client) {
-    if let Err(e) = run_update(&client).await {
-        client
-            .log_message(MessageType::INFO, format!("Update check skipped: {e}"))
-            .await;
-    }
 }
 
 // ---------------------------------------------------------------------------

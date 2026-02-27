@@ -1,6 +1,6 @@
 # wcag-lsp Rules
 
-wcag-lsp performs static analysis of HTML and JSX/TSX code to detect WCAG 2.1/2.2 accessibility violations. This document lists all 31 rules and maps them to WCAG success criteria.
+wcag-lsp performs static analysis of HTML and JSX/TSX code to detect WCAG 2.1/2.2 accessibility violations. This document lists all 40 rules and maps them to WCAG success criteria.
 
 > **Note:** Many WCAG criteria require runtime testing, visual inspection, or assistive technology and cannot be checked statically. These are documented in the [coverage matrix](#wcag-22-criterion-coverage) below.
 
@@ -10,9 +10,17 @@ wcag-lsp performs static analysis of HTML and JSX/TSX code to detect WCAG 2.1/2.
 |---------|---------------|-------|-----------------|-------------|
 | `anchor-content` | [2.4.4](https://www.w3.org/WAI/WCAG21/Understanding/link-purpose-in-context.html) | A | Error | `<a>` elements must have text content |
 | `area-alt` | [1.1.1](https://www.w3.org/WAI/WCAG21/Understanding/non-text-content.html) | A | Error | `<area>` elements must have alt, aria-label, or aria-labelledby |
+| `aria-allowed-attr` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | ARIA attributes must be allowed for the element's role |
+| `aria-deprecated-role` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Warning | Deprecated ARIA roles must not be used |
+| `aria-hidden-body` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | `<body>` must not have `aria-hidden="true"` |
+| `aria-hidden-focus` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | Elements with `aria-hidden="true"` must not contain focusable elements |
+| `aria-prohibited-attr` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | ARIA attributes prohibited for a role must not be used |
 | `aria-props` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | `aria-*` attributes must be valid ARIA properties |
 | `aria-required-attr` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | Elements with ARIA roles must have all required ARIA attributes |
+| `aria-required-children` | [1.3.1](https://www.w3.org/WAI/WCAG21/Understanding/info-and-relationships.html) | A | Error | Elements with ARIA roles must have required child roles |
+| `aria-required-parent` | [1.3.1](https://www.w3.org/WAI/WCAG21/Understanding/info-and-relationships.html) | A | Error | Elements with ARIA roles must be contained in required parent roles |
 | `aria-role` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | `role` attribute must be a valid ARIA role |
+| `aria-valid-attr-value` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | ARIA attribute values must be valid for their type |
 | `autocomplete-valid` | [1.3.5](https://www.w3.org/WAI/WCAG21/Understanding/identify-input-purpose.html) | AA | Warning | `autocomplete` attribute must have a valid value |
 | `button-name` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | `<button>` elements must have an accessible name |
 | `click-events-have-key-events` | [2.1.1](https://www.w3.org/WAI/WCAG21/Understanding/keyboard.html) | A | Error | Elements with `onClick` must also have `onKeyDown` or `onKeyUp` |
@@ -28,6 +36,7 @@ wcag-lsp performs static analysis of HTML and JSX/TSX code to detect WCAG 2.1/2.
 | `media-captions` | [1.2.2](https://www.w3.org/WAI/WCAG21/Understanding/captions-prerecorded.html) | A | Warning | `<video>` and `<audio>` elements must have `<track>` captions |
 | `meta-refresh` | [2.2.1](https://www.w3.org/WAI/WCAG21/Understanding/timing-adjustable.html) | A | Error | `<meta http-equiv="refresh">` must not have a time limit |
 | `mouse-events-have-key-events` | [2.1.1](https://www.w3.org/WAI/WCAG21/Understanding/keyboard.html) | A | Error | Mouse event handlers must have corresponding keyboard event handlers |
+| `nested-interactive` | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html) | A | Error | Interactive elements must not be nested inside other interactive elements |
 | `no-access-key` | [2.4.3](https://www.w3.org/WAI/WCAG21/Understanding/focus-order.html) | A | Warning | `accesskey` attribute should not be used |
 | `no-autoplay` | [1.4.2](https://www.w3.org/WAI/WCAG21/Understanding/audio-control.html) | A | Warning | `<audio>` and `<video>` must not autoplay without `muted` |
 | `no-distracting-elements` | [2.2.2](https://www.w3.org/WAI/WCAG21/Understanding/pause-stop-hide.html) | A | Error | `<blink>` and `<marquee>` elements must not be used |
@@ -56,7 +65,7 @@ wcag-lsp performs static analysis of HTML and JSX/TSX code to detect WCAG 2.1/2.
 | 1.2.7 Extended Audio Description | AAA | Not statically checkable |
 | 1.2.8 Media Alternative (Prerecorded) | AAA | Not statically checkable |
 | 1.2.9 Audio-only (Live) | AAA | Not statically checkable |
-| 1.3.1 Info and Relationships | A | Covered by `form-label`, `heading-order`, `table-header`, `list-structure`, `scope-attr` |
+| 1.3.1 Info and Relationships | A | Covered by `form-label`, `heading-order`, `table-header`, `list-structure`, `scope-attr`, `aria-required-children`, `aria-required-parent` |
 | 1.3.2 Meaningful Sequence | A | Not statically checkable (requires visual inspection) |
 | 1.3.3 Sensory Characteristics | A | Not statically checkable (requires content analysis) |
 | 1.3.4 Orientation | AA | Not statically checkable (requires runtime testing) |
@@ -146,5 +155,5 @@ wcag-lsp performs static analysis of HTML and JSX/TSX code to detect WCAG 2.1/2.
 | Criterion | Level | Status |
 |-----------|-------|--------|
 | 4.1.1 Parsing | A | Covered by `no-duplicate-id` |
-| 4.1.2 Name, Role, Value | A | Covered by `aria-role`, `aria-props`, `aria-required-attr`, `button-name`, `no-redundant-roles` |
+| 4.1.2 Name, Role, Value | A | Covered by `aria-role`, `aria-props`, `aria-required-attr`, `aria-allowed-attr`, `aria-prohibited-attr`, `aria-valid-attr-value`, `aria-deprecated-role`, `aria-hidden-body`, `aria-hidden-focus`, `nested-interactive`, `button-name`, `no-redundant-roles` |
 | 4.1.3 Status Messages | AA | Not statically checkable (requires runtime testing) |
