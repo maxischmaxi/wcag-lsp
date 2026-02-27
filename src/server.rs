@@ -1,14 +1,16 @@
 use crate::document::DocumentManager;
+use crate::engine;
+use crate::rules::{self, Rule};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::*;
 use tower_lsp_server::{Client, LanguageServer};
 
-#[derive(Debug)]
 pub struct WcagLspServer {
     pub client: Client,
     pub documents: Arc<RwLock<DocumentManager>>,
+    pub rules: Vec<Box<dyn Rule>>,
 }
 
 impl WcagLspServer {
@@ -16,7 +18,22 @@ impl WcagLspServer {
         Self {
             client,
             documents: Arc::new(RwLock::new(DocumentManager::new())),
+            rules: rules::all_rules(),
         }
+    }
+
+    async fn diagnose(&self, uri: Uri, version: Option<i32>) {
+        let docs = self.documents.read().await;
+        let uri_str = uri.to_string();
+        let diagnostics = if let Some(doc) = docs.get(&uri_str) {
+            engine::run_diagnostics(doc, &self.rules)
+        } else {
+            vec![]
+        };
+        drop(docs);
+        self.client
+            .publish_diagnostics(uri, diagnostics, version)
+            .await;
     }
 }
 
@@ -48,7 +65,8 @@ impl LanguageServer for WcagLspServer {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri_str = params.text_document.uri.to_string();
+        let uri = params.text_document.uri;
+        let uri_str = uri.to_string();
         let text = params.text_document.text;
         let version = params.text_document.version;
 
@@ -56,9 +74,7 @@ impl LanguageServer for WcagLspServer {
         docs.open(uri_str, text, version);
         drop(docs);
 
-        self.client
-            .publish_diagnostics(params.text_document.uri, vec![], Some(version))
-            .await;
+        self.diagnose(uri, Some(version)).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -69,9 +85,7 @@ impl LanguageServer for WcagLspServer {
             docs.update(&uri.to_string(), change.text, version);
             drop(docs);
 
-            self.client
-                .publish_diagnostics(uri, vec![], Some(version))
-                .await;
+            self.diagnose(uri, Some(version)).await;
         }
     }
 
