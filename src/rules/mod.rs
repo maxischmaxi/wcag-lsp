@@ -11,7 +11,11 @@ pub mod heading_order;
 pub mod html_lang;
 pub mod iframe_title;
 pub mod img_alt;
+pub mod media_captions;
+pub mod meta_refresh;
+pub mod no_redundant_alt;
 pub mod tabindex;
+pub mod table_header;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WcagLevel {
@@ -51,6 +55,10 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(html_lang::HtmlLang),
         Box::new(iframe_title::IframeTitle),
         Box::new(img_alt::ImgAlt),
+        Box::new(media_captions::MediaCaptions),
+        Box::new(meta_refresh::MetaRefresh),
+        Box::new(no_redundant_alt::NoRedundantAlt),
         Box::new(tabindex::Tabindex),
+        Box::new(table_header::TableHeader),
     ]
 }
