@@ -7,7 +7,7 @@ Built with Rust and [tree-sitter](https://tree-sitter.github.io/) for incrementa
 ## Features
 
 - Real-time WCAG diagnostics as you type (150ms debounce)
-- 14 rules covering WCAG 2.1 Level A criteria
+- 31 rules covering WCAG 2.1/2.2 Level A and AA criteria
 - Supports HTML, JSX, TSX, Vue, Svelte, Astro, PHP, ERB, Handlebars, and Twig
 - Configurable severity levels and per-rule overrides
 - Glob-based file ignore patterns
@@ -144,24 +144,9 @@ patterns = [
 
 ## Rules
 
-All rules are WCAG 2.1 Level A. Rule IDs are used in the `[rules]` config section.
+wcag-lsp includes 31 rules covering WCAG 2.1/2.2 Level A and AA criteria.
 
-| Rule ID                        | WCAG                                                                              | Default | Description                                                          |
-| ------------------------------ | --------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------- |
-| `img-alt`                      | [1.1.1](https://www.w3.org/WAI/WCAG21/Understanding/non-text-content.html)        | Error   | `<img>` elements must have an `alt` attribute                        |
-| `no-redundant-alt`             | [1.1.1](https://www.w3.org/WAI/WCAG21/Understanding/non-text-content.html)        | Warning | Alt text should not contain words like "image", "picture", "photo"   |
-| `media-captions`               | [1.2.2](https://www.w3.org/WAI/WCAG21/Understanding/captions-prerecorded.html)    | Warning | `<video>` and `<audio>` elements must have `<track>` captions        |
-| `form-label`                   | [1.3.1](https://www.w3.org/WAI/WCAG21/Understanding/info-and-relationships.html)  | Error   | Form elements (`<input>`, `<select>`, `<textarea>`) must have labels |
-| `heading-order`                | [1.3.1](https://www.w3.org/WAI/WCAG21/Understanding/info-and-relationships.html)  | Warning | Heading levels should not be skipped (e.g. `<h1>` to `<h3>`)         |
-| `table-header`                 | [1.3.1](https://www.w3.org/WAI/WCAG21/Understanding/info-and-relationships.html)  | Warning | `<table>` elements must contain `<th>` header cells                  |
-| `click-events-have-key-events` | [2.1.1](https://www.w3.org/WAI/WCAG21/Understanding/keyboard.html)                | Error   | Elements with `onClick` must also have `onKeyDown` or `onKeyUp`      |
-| `meta-refresh`                 | [2.2.1](https://www.w3.org/WAI/WCAG21/Understanding/timing-adjustable.html)       | Error   | `<meta http-equiv="refresh">` must not have a time limit             |
-| `iframe-title`                 | [2.4.1](https://www.w3.org/WAI/WCAG21/Understanding/bypass-blocks.html)           | Error   | `<iframe>` elements must have a `title` attribute                    |
-| `no-positive-tabindex`         | [2.4.3](https://www.w3.org/WAI/WCAG21/Understanding/focus-order.html)             | Warning | Avoid `tabindex` values greater than 0                               |
-| `anchor-content`               | [2.4.4](https://www.w3.org/WAI/WCAG21/Understanding/link-purpose-in-context.html) | Error   | `<a>` elements must have text content                                |
-| `html-lang`                    | [3.1.1](https://www.w3.org/WAI/WCAG21/Understanding/language-of-page.html)        | Error   | `<html>` element must have a `lang` attribute                        |
-| `aria-role`                    | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html)         | Error   | `role` attribute must be a valid ARIA role                           |
-| `aria-props`                   | [4.1.2](https://www.w3.org/WAI/WCAG21/Understanding/name-role-value.html)         | Error   | `aria-*` attributes must be valid ARIA properties                    |
+See [RULES.md](RULES.md) for the complete rule reference and WCAG criterion coverage matrix.
 
 ## Contributing
 
