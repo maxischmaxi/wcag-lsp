@@ -18,6 +18,12 @@ static METADATA: RuleMetadata = RuleMetadata {
 /// Elements that natively handle keyboard events and don't need explicit key handlers.
 const INTERACTIVE_TAGS: &[&str] = &["button", "a", "input", "select", "textarea"];
 
+/// In JSX, components starting with an uppercase letter are custom React components.
+/// They handle their own keyboard accessibility internally, so we skip them.
+fn is_custom_component(name: &str) -> bool {
+    name.starts_with(char::is_uppercase)
+}
+
 impl Rule for ClickEvents {
     fn metadata(&self) -> &RuleMetadata {
         &METADATA
@@ -153,9 +159,9 @@ fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
         }
     }
 
-    // Skip interactive elements
+    // Skip interactive elements and custom components
     if let Some(ref name) = tag_name
-        && INTERACTIVE_TAGS.contains(&name.as_str())
+        && (INTERACTIVE_TAGS.contains(&name.as_str()) || is_custom_component(name))
     {
         return;
     }
@@ -191,9 +197,9 @@ fn check_jsx_opening(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
                 }
             }
 
-            // Skip interactive elements
+            // Skip interactive elements and custom components
             if let Some(ref name) = tag_name
-                && INTERACTIVE_TAGS.contains(&name.as_str())
+                && (INTERACTIVE_TAGS.contains(&name.as_str()) || is_custom_component(name))
             {
                 return;
             }
@@ -330,5 +336,23 @@ mod tests {
         let diags =
             check_tsx(r#"const App = () => <div onClick={handler} onKeyUp={handler}>text</div>;"#);
         assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_custom_component_with_onclick_passes() {
+        let diags = check_tsx(r#"const App = () => <IconLabelButton onClick={handler} />;"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_custom_component_element_with_onclick_passes() {
+        let diags = check_tsx(r#"const App = () => <MyButton onClick={handler}>Click</MyButton>;"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_lowercase_div_with_onclick_still_fails() {
+        let diags = check_tsx(r#"const App = () => <span onClick={handler} />;"#);
+        assert_eq!(diags.len(), 1);
     }
 }

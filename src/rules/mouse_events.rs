@@ -15,6 +15,12 @@ static METADATA: RuleMetadata = RuleMetadata {
     default_severity: Severity::Error,
 };
 
+/// In JSX, components starting with an uppercase letter are custom React components.
+/// They handle their own keyboard accessibility internally, so we skip them.
+fn is_custom_component(name: &str) -> bool {
+    name.starts_with(char::is_uppercase)
+}
+
 impl Rule for MouseEvents {
     fn metadata(&self) -> &RuleMetadata {
         &METADATA
@@ -128,6 +134,7 @@ fn visit_jsx(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let mut tag_name: Option<String> = None;
     let mut has_mouseover = false;
     let mut has_mouseout = false;
     let mut has_focus = false;
@@ -135,6 +142,9 @@ fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
+        if child.kind() == "identifier" {
+            tag_name = Some(source[child.byte_range()].to_string());
+        }
         if child.kind() == "jsx_attribute" {
             let attr_name = extract_jsx_attr_name(&child, source);
             if let Some(name) = attr_name {
@@ -154,6 +164,13 @@ fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
         }
     }
 
+    // Skip custom React components
+    if let Some(ref name) = tag_name
+        && is_custom_component(name)
+    {
+        return;
+    }
+
     if has_mouseover && !has_focus {
         diagnostics.push(make_diagnostic(node, "onMouseOver", "onFocus"));
     }
@@ -166,6 +183,7 @@ fn check_jsx_opening(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "jsx_opening_element" {
+            let mut tag_name: Option<String> = None;
             let mut has_mouseover = false;
             let mut has_mouseout = false;
             let mut has_focus = false;
@@ -173,6 +191,9 @@ fn check_jsx_opening(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
 
             let mut inner_cursor = child.walk();
             for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "identifier" {
+                    tag_name = Some(source[inner_child.byte_range()].to_string());
+                }
                 if inner_child.kind() == "jsx_attribute" {
                     let attr_name = extract_jsx_attr_name(&inner_child, source);
                     if let Some(name) = attr_name {
@@ -190,6 +211,13 @@ fn check_jsx_opening(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
                         }
                     }
                 }
+            }
+
+            // Skip custom React components
+            if let Some(ref name) = tag_name
+                && is_custom_component(name)
+            {
+                return;
             }
 
             if has_mouseover && !has_focus {
@@ -328,6 +356,19 @@ mod tests {
         let diags = check_tsx(
             r#"const App = () => <div onMouseOver={handler} onFocus={handler}>text</div>;"#,
         );
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_custom_component_with_mouseover_passes() {
+        let diags = check_tsx(r#"const App = () => <Tooltip onMouseOver={handler} />;"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_custom_component_element_with_mouseout_passes() {
+        let diags =
+            check_tsx(r#"const App = () => <HoverCard onMouseOut={handler}>text</HoverCard>;"#);
         assert_eq!(diags.len(), 0);
     }
 }
