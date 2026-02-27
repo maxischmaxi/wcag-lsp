@@ -1,3 +1,4 @@
+mod parser;
 mod server;
 
 use server::WcagLspServer;
