@@ -70,12 +70,11 @@ fn check_html_start_tag(
         if child.kind() == "attribute" {
             let (attr_name, attr_value) = extract_html_attribute(&child, source);
             if let Some(name) = attr_name {
-                if name.eq_ignore_ascii_case("http-equiv") {
-                    if let Some(ref val) = attr_value {
-                        if val.eq_ignore_ascii_case("refresh") {
-                            is_refresh = true;
-                        }
-                    }
+                if name.eq_ignore_ascii_case("http-equiv")
+                    && let Some(ref val) = attr_value
+                    && val.eq_ignore_ascii_case("refresh")
+                {
+                    is_refresh = true;
                 }
                 if name.eq_ignore_ascii_case("content") {
                     content_value = attr_value;
@@ -84,12 +83,12 @@ fn check_html_start_tag(
         }
     }
 
-    if is_meta && is_refresh {
-        if let Some(ref content) = content_value {
-            if has_nonzero_delay(content) {
-                diagnostics.push(make_diagnostic(element_node));
-            }
-        }
+    if is_meta
+        && is_refresh
+        && let Some(ref content) = content_value
+        && has_nonzero_delay(content)
+    {
+        diagnostics.push(make_diagnostic(element_node));
     }
 }
 

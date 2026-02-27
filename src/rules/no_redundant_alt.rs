@@ -75,22 +75,22 @@ fn check_html_start_tag(
         }
         if child.kind() == "attribute" {
             let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(name) = attr_name {
-                if name.eq_ignore_ascii_case("alt") {
-                    alt_value = attr_value;
-                }
+            if let Some(name) = attr_name
+                && name.eq_ignore_ascii_case("alt")
+            {
+                alt_value = attr_value;
             }
         }
     }
 
-    if is_img {
-        if let Some(ref alt) = alt_value {
-            if !alt.is_empty() && contains_redundant_word(alt) {
-                diagnostics.push(make_diagnostic(element_node));
-            }
-        }
-        // No alt attribute or empty alt → handled by img-alt rule, not this one
+    if is_img
+        && let Some(ref alt) = alt_value
+        && !alt.is_empty()
+        && contains_redundant_word(alt)
+    {
+        diagnostics.push(make_diagnostic(element_node));
     }
+    // No alt attribute or empty alt → handled by img-alt rule, not this one
 }
 
 /// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
@@ -151,20 +151,20 @@ fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
         }
         if child.kind() == "jsx_attribute" {
             let (attr_name, attr_value) = extract_jsx_attribute(&child, source);
-            if let Some(name) = attr_name {
-                if name == "alt" {
-                    alt_value = attr_value;
-                }
+            if let Some(name) = attr_name
+                && name == "alt"
+            {
+                alt_value = attr_value;
             }
         }
     }
 
-    if is_img {
-        if let Some(ref alt) = alt_value {
-            if !alt.is_empty() && contains_redundant_word(alt) {
-                diagnostics.push(make_diagnostic(node));
-            }
-        }
+    if is_img
+        && let Some(ref alt) = alt_value
+        && !alt.is_empty()
+        && contains_redundant_word(alt)
+    {
+        diagnostics.push(make_diagnostic(node));
     }
 }
 
@@ -185,20 +185,20 @@ fn check_jsx_opening(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
                 }
                 if inner_child.kind() == "jsx_attribute" {
                     let (attr_name, attr_value) = extract_jsx_attribute(&inner_child, source);
-                    if let Some(name) = attr_name {
-                        if name == "alt" {
-                            alt_value = attr_value;
-                        }
+                    if let Some(name) = attr_name
+                        && name == "alt"
+                    {
+                        alt_value = attr_value;
                     }
                 }
             }
 
-            if is_img {
-                if let Some(ref alt) = alt_value {
-                    if !alt.is_empty() && contains_redundant_word(alt) {
-                        diagnostics.push(make_diagnostic(node));
-                    }
-                }
+            if is_img
+                && let Some(ref alt) = alt_value
+                && !alt.is_empty()
+                && contains_redundant_word(alt)
+            {
+                diagnostics.push(make_diagnostic(node));
             }
         }
     }

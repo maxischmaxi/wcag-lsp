@@ -112,16 +112,13 @@ fn is_caption_track_element(element: &Node, source: &str) -> bool {
                 }
                 if tag_child.kind() == "attribute" {
                     let (attr_name, attr_value) = extract_html_attribute(&tag_child, source);
-                    if let Some(name) = attr_name {
-                        if name.eq_ignore_ascii_case("kind") {
-                            if let Some(ref val) = attr_value {
-                                if val.eq_ignore_ascii_case("captions")
-                                    || val.eq_ignore_ascii_case("subtitles")
-                                {
-                                    has_caption_kind = true;
-                                }
-                            }
-                        }
+                    if let Some(name) = attr_name
+                        && name.eq_ignore_ascii_case("kind")
+                        && let Some(ref val) = attr_value
+                        && (val.eq_ignore_ascii_case("captions")
+                            || val.eq_ignore_ascii_case("subtitles"))
+                    {
+                        has_caption_kind = true;
                     }
                 }
             }

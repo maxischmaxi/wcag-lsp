@@ -88,10 +88,10 @@ fn check_html_tag(
     }
 
     // Skip interactive elements that natively handle keyboard
-    if let Some(ref name) = tag_name {
-        if INTERACTIVE_TAGS.iter().any(|t| t == name) {
-            return;
-        }
+    if let Some(ref name) = tag_name
+        && INTERACTIVE_TAGS.iter().any(|t| t == name)
+    {
+        return;
     }
 
     if has_onclick && !has_key_event {
@@ -154,10 +154,10 @@ fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
     }
 
     // Skip interactive elements
-    if let Some(ref name) = tag_name {
-        if INTERACTIVE_TAGS.contains(&name.as_str()) {
-            return;
-        }
+    if let Some(ref name) = tag_name
+        && INTERACTIVE_TAGS.contains(&name.as_str())
+    {
+        return;
     }
 
     if has_onclick && !has_key_event {
@@ -192,10 +192,10 @@ fn check_jsx_opening(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
             }
 
             // Skip interactive elements
-            if let Some(ref name) = tag_name {
-                if INTERACTIVE_TAGS.contains(&name.as_str()) {
-                    return;
-                }
+            if let Some(ref name) = tag_name
+                && INTERACTIVE_TAGS.contains(&name.as_str())
+            {
+                return;
             }
 
             if has_onclick && !has_key_event {

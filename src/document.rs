@@ -32,9 +32,9 @@ impl DocumentManager {
     }
 
     fn get_or_create_parser(&mut self, file_type: FileType) -> Option<&mut Parser> {
-        if !self.parsers.contains_key(&file_type) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.parsers.entry(file_type) {
             let parser = parser::create_parser(file_type)?;
-            self.parsers.insert(file_type, parser);
+            e.insert(parser);
         }
         self.parsers.get_mut(&file_type)
     }
@@ -58,9 +58,9 @@ impl DocumentManager {
         let file_type = self.documents.get(uri)?.file_type;
 
         // Inline parser creation to allow split borrows on self.parsers and self.documents
-        if !self.parsers.contains_key(&file_type) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.parsers.entry(file_type) {
             let p = parser::create_parser(file_type)?;
-            self.parsers.insert(file_type, p);
+            e.insert(p);
         }
 
         let parser = self.parsers.get_mut(&file_type)?;

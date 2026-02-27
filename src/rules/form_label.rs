@@ -98,22 +98,19 @@ fn check_html_start_tag(
                 {
                     has_label = true;
                 }
-                if name.eq_ignore_ascii_case("type") {
-                    if let Some(val) = &attr_value {
-                        if val.eq_ignore_ascii_case("hidden") {
-                            is_hidden = true;
-                        }
-                    }
+                if name.eq_ignore_ascii_case("type")
+                    && let Some(val) = &attr_value
+                    && val.eq_ignore_ascii_case("hidden")
+                {
+                    is_hidden = true;
                 }
             }
         }
     }
 
     // Check if the element is wrapped in a <label>
-    if is_form_element && !has_label {
-        if is_inside_label(element_node, source) {
-            has_label = true;
-        }
+    if is_form_element && !has_label && is_inside_label(element_node, source) {
+        has_label = true;
     }
 
     if is_form_element && !is_hidden && !has_label {
@@ -147,10 +144,7 @@ fn is_inside_label(node: &Node, source: &str) -> bool {
 }
 
 /// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute<'a>(
-    attr_node: &Node,
-    source: &'a str,
-) -> (Option<String>, Option<String>) {
+fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
     let mut name = None;
     let mut value = None;
 
@@ -212,12 +206,11 @@ fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
                 if LABEL_ATTRS_JSX.iter().any(|a| *a == name) {
                     has_label = true;
                 }
-                if name == "type" {
-                    if let Some(val) = &attr_value {
-                        if val == "hidden" {
-                            is_hidden = true;
-                        }
-                    }
+                if name == "type"
+                    && let Some(val) = &attr_value
+                    && val == "hidden"
+                {
+                    is_hidden = true;
                 }
             }
         }
@@ -256,12 +249,11 @@ fn check_jsx_element(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
                         if LABEL_ATTRS_JSX.iter().any(|a| *a == name) {
                             has_label = true;
                         }
-                        if name == "type" {
-                            if let Some(val) = &attr_value {
-                                if val == "hidden" {
-                                    is_hidden = true;
-                                }
-                            }
+                        if name == "type"
+                            && let Some(val) = &attr_value
+                            && val == "hidden"
+                        {
+                            is_hidden = true;
                         }
                     }
                 }
@@ -305,10 +297,7 @@ fn is_inside_jsx_label(node: &Node, source: &str) -> bool {
 }
 
 /// Extract (attribute_name, Option<string_value>) from a JSX attribute node.
-fn extract_jsx_attribute<'a>(
-    attr_node: &Node,
-    source: &'a str,
-) -> (Option<String>, Option<String>) {
+fn extract_jsx_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
     let mut name = None;
     let mut value = None;
 

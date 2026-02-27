@@ -62,14 +62,13 @@ impl WcagLspServer {
 impl LanguageServer for WcagLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         // Try to load config from workspace root
-        if let Some(folders) = &params.workspace_folders {
-            if let Some(folder) = folders.first() {
-                if let Some(path) = folder.uri.to_file_path() {
-                    let config_path = path.join(".wcag-lsp.toml");
-                    let config = Config::from_file(&config_path);
-                    *self.config.write().await = config;
-                }
-            }
+        if let Some(folders) = &params.workspace_folders
+            && let Some(folder) = folders.first()
+            && let Some(path) = folder.uri.to_file_path()
+        {
+            let config_path = path.join(".wcag-lsp.toml");
+            let config = Config::from_file(&config_path);
+            *self.config.write().await = config;
         }
 
         Ok(InitializeResult {
@@ -83,7 +82,6 @@ impl LanguageServer for WcagLspServer {
                 name: "wcag-lsp".to_string(),
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
-            ..Default::default()
         })
     }
 

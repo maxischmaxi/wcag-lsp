@@ -68,14 +68,12 @@ fn check_html_attribute(node: &Node, source: &str, diagnostics: &mut Vec<Diagnos
         }
     }
 
-    if is_tabindex {
-        if let Some(val) = value {
-            if let Ok(n) = val.trim().parse::<i32>() {
-                if n > 0 {
-                    diagnostics.push(make_diagnostic(node));
-                }
-            }
-        }
+    if is_tabindex
+        && let Some(val) = value
+        && let Ok(n) = val.trim().parse::<i32>()
+        && n > 0
+    {
+        diagnostics.push(make_diagnostic(node));
     }
 }
 
@@ -122,14 +120,12 @@ fn check_jsx_attribute(node: &Node, source: &str, diagnostics: &mut Vec<Diagnost
         }
     }
 
-    if is_tabindex {
-        if let Some(val) = value {
-            if let Ok(n) = val.trim().parse::<i32>() {
-                if n > 0 {
-                    diagnostics.push(make_diagnostic(node));
-                }
-            }
-        }
+    if is_tabindex
+        && let Some(val) = value
+        && let Ok(n) = val.trim().parse::<i32>()
+        && n > 0
+    {
+        diagnostics.push(make_diagnostic(node));
     }
 }
 

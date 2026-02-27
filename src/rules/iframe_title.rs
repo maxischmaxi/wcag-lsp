@@ -70,16 +70,14 @@ fn check_html_start_tag(
         }
         if child.kind() == "attribute" {
             let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(name) = attr_name {
-                if name.eq_ignore_ascii_case("title") {
-                    if let Some(val) = attr_value {
-                        if !val.trim().is_empty() {
-                            has_nonempty_title = true;
-                        }
-                    }
-                    // title attribute without a value (bare attribute) counts as empty
-                }
+            if let Some(name) = attr_name
+                && name.eq_ignore_ascii_case("title")
+                && let Some(val) = attr_value
+                && !val.trim().is_empty()
+            {
+                has_nonempty_title = true;
             }
+            // title attribute without a value (bare attribute) counts as empty
         }
     }
 
@@ -151,14 +149,12 @@ fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
         }
         if child.kind() == "jsx_attribute" {
             let (attr_name, attr_value) = extract_jsx_attribute(&child, source);
-            if let Some(name) = attr_name {
-                if name == "title" {
-                    if let Some(val) = attr_value {
-                        if !val.trim().is_empty() {
-                            has_nonempty_title = true;
-                        }
-                    }
-                }
+            if let Some(name) = attr_name
+                && name == "title"
+                && let Some(val) = attr_value
+                && !val.trim().is_empty()
+            {
+                has_nonempty_title = true;
             }
         }
     }
@@ -185,14 +181,12 @@ fn check_jsx_element(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
                 }
                 if inner_child.kind() == "jsx_attribute" {
                     let (attr_name, attr_value) = extract_jsx_attribute(&inner_child, source);
-                    if let Some(name) = attr_name {
-                        if name == "title" {
-                            if let Some(val) = attr_value {
-                                if !val.trim().is_empty() {
-                                    has_nonempty_title = true;
-                                }
-                            }
-                        }
+                    if let Some(name) = attr_name
+                        && name == "title"
+                        && let Some(val) = attr_value
+                        && !val.trim().is_empty()
+                    {
+                        has_nonempty_title = true;
                     }
                 }
             }

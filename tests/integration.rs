@@ -102,7 +102,7 @@ fn test_config_disables_rule() {
         .open("file:///test.html".to_string(), html.to_string(), 1)
         .unwrap();
     let rules = rules::all_rules();
-    let config = Config::from_str(
+    let config = Config::parse(
         r#"
 [rules]
 img-alt = "off"
@@ -139,7 +139,7 @@ fn test_config_severity_override() {
         .open("file:///test.html".to_string(), html.to_string(), 1)
         .unwrap();
     let rules = rules::all_rules();
-    let config = Config::from_str(
+    let config = Config::parse(
         r#"
 [rules]
 img-alt = "warning"

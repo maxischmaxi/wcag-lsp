@@ -64,12 +64,11 @@ fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagno
                 }
                 if tag_child.kind() == "attribute" {
                     let attr_name = extract_html_attr_name(&tag_child, source);
-                    if let Some(name) = attr_name {
-                        if name.eq_ignore_ascii_case("aria-label")
-                            || name.eq_ignore_ascii_case("aria-labelledby")
-                        {
-                            has_aria_label = true;
-                        }
+                    if let Some(name) = attr_name
+                        && (name.eq_ignore_ascii_case("aria-label")
+                            || name.eq_ignore_ascii_case("aria-labelledby"))
+                    {
+                        has_aria_label = true;
                     }
                 }
             }
@@ -114,7 +113,7 @@ fn has_content(element: &Node, source: &str) -> bool {
     false
 }
 
-fn extract_html_attr_name<'a>(attr_node: &Node, source: &'a str) -> Option<String> {
+fn extract_html_attr_name(attr_node: &Node, source: &str) -> Option<String> {
     let mut cursor = attr_node.walk();
     for child in attr_node.children(&mut cursor) {
         if child.kind() == "attribute_name" {
@@ -159,14 +158,13 @@ fn check_jsx_self_closing(node: &Node, source: &str, diagnostics: &mut Vec<Diagn
         }
         if child.kind() == "jsx_attribute" {
             let attr_name = extract_jsx_attr_name(&child, source);
-            if let Some(name) = attr_name {
-                if name == "aria-label"
+            if let Some(name) = attr_name
+                && (name == "aria-label"
                     || name == "aria-labelledby"
                     || name == "ariaLabel"
-                    || name == "ariaLabelledby"
-                {
-                    has_aria_label = true;
-                }
+                    || name == "ariaLabelledby")
+            {
+                has_aria_label = true;
             }
         }
     }
@@ -194,14 +192,13 @@ fn check_jsx_element(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
                 }
                 if inner_child.kind() == "jsx_attribute" {
                     let attr_name = extract_jsx_attr_name(&inner_child, source);
-                    if let Some(name) = attr_name {
-                        if name == "aria-label"
+                    if let Some(name) = attr_name
+                        && (name == "aria-label"
                             || name == "aria-labelledby"
                             || name == "ariaLabel"
-                            || name == "ariaLabelledby"
-                        {
-                            has_aria_label = true;
-                        }
+                            || name == "ariaLabelledby")
+                    {
+                        has_aria_label = true;
                     }
                 }
             }
@@ -244,7 +241,7 @@ fn has_jsx_content(node: &Node, source: &str) -> bool {
     false
 }
 
-fn extract_jsx_attr_name<'a>(attr_node: &Node, source: &'a str) -> Option<String> {
+fn extract_jsx_attr_name(attr_node: &Node, source: &str) -> Option<String> {
     let mut cursor = attr_node.walk();
     for child in attr_node.children(&mut cursor) {
         if child.kind() == "property_identifier" {

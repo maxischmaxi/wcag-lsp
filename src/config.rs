@@ -52,10 +52,10 @@ impl Config {
             Ok(c) => c,
             Err(_) => return Self::default(),
         };
-        Self::from_str(&content)
+        Self::parse(&content)
     }
 
-    pub fn from_str(content: &str) -> Self {
+    pub fn parse(content: &str) -> Self {
         let raw: RawConfig = match toml::from_str(content) {
             Ok(r) => r,
             Err(_) => return Self::default(),
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn test_parse_config() {
-        let config = Config::from_str(
+        let config = Config::parse(
             r#"
 [severity]
 A = "error"
@@ -173,13 +173,13 @@ patterns = ["node_modules/**", "dist/**"]
 
     #[test]
     fn test_invalid_toml_returns_defaults() {
-        let config = Config::from_str("this is not valid toml {{{}}}");
+        let config = Config::parse("this is not valid toml {{{}}}");
         assert_eq!(config.severity_a, Severity::Error);
     }
 
     #[test]
     fn test_empty_config_returns_defaults() {
-        let config = Config::from_str("");
+        let config = Config::parse("");
         assert_eq!(config.severity_a, Severity::Error);
         assert!(config.rule_overrides.is_empty());
     }

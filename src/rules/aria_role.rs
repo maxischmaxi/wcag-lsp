@@ -158,10 +158,8 @@ fn check_html_attribute(node: &Node, source: &str, diagnostics: &mut Vec<Diagnos
         }
     }
 
-    if is_role {
-        if let Some((val, val_node)) = value {
-            check_role_value(&val, &val_node, diagnostics);
-        }
+    if is_role && let Some((val, val_node)) = value {
+        check_role_value(&val, &val_node, diagnostics);
     }
 }
 
@@ -199,10 +197,8 @@ fn check_jsx_attribute(node: &Node, source: &str, diagnostics: &mut Vec<Diagnost
         }
     }
 
-    if is_role {
-        if let Some((val, val_node)) = value {
-            check_role_value(&val, &val_node, diagnostics);
-        }
+    if is_role && let Some((val, val_node)) = value {
+        check_role_value(&val, &val_node, diagnostics);
     }
 }
 
