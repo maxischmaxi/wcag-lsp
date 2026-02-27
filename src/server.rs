@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::document::DocumentManager;
 use crate::engine;
 use crate::rules::{self, Rule};
@@ -10,6 +11,7 @@ use tower_lsp_server::{Client, LanguageServer};
 pub struct WcagLspServer {
     pub client: Client,
     pub documents: Arc<RwLock<DocumentManager>>,
+    pub config: Arc<RwLock<Config>>,
     pub rules: Vec<Box<dyn Rule>>,
 }
 
@@ -18,19 +20,22 @@ impl WcagLspServer {
         Self {
             client,
             documents: Arc::new(RwLock::new(DocumentManager::new())),
+            config: Arc::new(RwLock::new(Config::default())),
             rules: rules::all_rules(),
         }
     }
 
     async fn diagnose(&self, uri: Uri, version: Option<i32>) {
         let docs = self.documents.read().await;
+        let config = self.config.read().await;
         let uri_str = uri.to_string();
         let diagnostics = if let Some(doc) = docs.get(&uri_str) {
-            engine::run_diagnostics(doc, &self.rules)
+            engine::run_diagnostics(doc, &self.rules, &config)
         } else {
             vec![]
         };
         drop(docs);
+        drop(config);
         self.client
             .publish_diagnostics(uri, diagnostics, version)
             .await;
@@ -38,7 +43,18 @@ impl WcagLspServer {
 }
 
 impl LanguageServer for WcagLspServer {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Try to load config from workspace root
+        if let Some(folders) = &params.workspace_folders {
+            if let Some(folder) = folders.first() {
+                if let Some(path) = folder.uri.to_file_path() {
+                    let config_path = path.join(".wcag-lsp.toml");
+                    let config = Config::from_file(&config_path);
+                    *self.config.write().await = config;
+                }
+            }
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
