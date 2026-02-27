@@ -93,6 +93,11 @@ impl LanguageServer for WcagLspServer {
         self.client
             .log_message(MessageType::INFO, "wcag-lsp initialized")
             .await;
+
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            crate::updater::check_for_update(client).await;
+        });
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
