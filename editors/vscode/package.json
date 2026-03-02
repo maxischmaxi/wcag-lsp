@@ -1,8 +1,8 @@
 {
   "name": "wcag-lsp",
-  "displayName": "WCAG Accessibility Linter",
+  "displayName": "wcag-lsp",
   "description": "Real-time WCAG 2.1 accessibility diagnostics for HTML, JSX, TSX, Vue, Svelte, and more",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "maxischmaxi",
   "license": "MIT",
   "repository": {

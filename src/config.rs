@@ -47,12 +47,26 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn from_file(path: &Path) -> Self {
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
+    pub fn from_dir(dir: &Path) -> Self {
+        let toml_path = dir.join(".wcag.toml");
+        if let Ok(content) = std::fs::read_to_string(&toml_path) {
+            return Self::parse(&content);
+        }
+
+        let json_path = dir.join(".wcag.json");
+        if let Ok(content) = std::fs::read_to_string(&json_path) {
+            return Self::parse_json(&content);
+        }
+
+        Self::default()
+    }
+
+    pub fn parse_json(content: &str) -> Self {
+        let raw: RawConfig = match serde_json::from_str(content) {
+            Ok(r) => r,
             Err(_) => return Self::default(),
         };
-        Self::parse(&content)
+        Self::from_raw(raw)
     }
 
     pub fn parse(content: &str) -> Self {
@@ -60,7 +74,10 @@ impl Config {
             Ok(r) => r,
             Err(_) => return Self::default(),
         };
+        Self::from_raw(raw)
+    }
 
+    fn from_raw(raw: RawConfig) -> Self {
         let parse_severity = |s: &str| -> Option<Severity> {
             match s.to_lowercase().as_str() {
                 "error" => Some(Severity::Error),
@@ -182,5 +199,70 @@ patterns = ["node_modules/**", "dist/**"]
         let config = Config::parse("");
         assert_eq!(config.severity_a, Severity::Error);
         assert!(config.rule_overrides.is_empty());
+    }
+
+    #[test]
+    fn test_parse_json() {
+        let config = Config::parse_json(
+            r#"{
+                "severity": { "A": "error", "AA": "error" },
+                "rules": { "heading-order": "off", "img-alt": "warning" },
+                "ignore": { "patterns": ["node_modules/**"] }
+            }"#,
+        );
+        assert_eq!(config.severity_aa, Severity::Error);
+        assert_eq!(
+            config.rule_overrides.get("heading-order"),
+            Some(&RuleOverride::Off)
+        );
+        assert_eq!(
+            config.rule_overrides.get("img-alt"),
+            Some(&RuleOverride::Severity(Severity::Warning))
+        );
+        assert_eq!(config.ignore_patterns, vec!["node_modules/**"]);
+    }
+
+    #[test]
+    fn test_invalid_json_returns_defaults() {
+        let config = Config::parse_json("not json {{{");
+        assert_eq!(config.severity_a, Severity::Error);
+        assert!(config.rule_overrides.is_empty());
+    }
+
+    #[test]
+    fn test_from_dir_prefers_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".wcag.toml"),
+            "[severity]\nAA = \"error\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".wcag.json"),
+            r#"{"severity": {"AA": "warning"}}"#,
+        )
+        .unwrap();
+        let config = Config::from_dir(dir.path());
+        assert_eq!(config.severity_aa, Severity::Error);
+    }
+
+    #[test]
+    fn test_from_dir_falls_back_to_json() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".wcag.json"),
+            r#"{"severity": {"AA": "error"}}"#,
+        )
+        .unwrap();
+        let config = Config::from_dir(dir.path());
+        assert_eq!(config.severity_aa, Severity::Error);
+    }
+
+    #[test]
+    fn test_from_dir_no_config_returns_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::from_dir(dir.path());
+        assert_eq!(config.severity_a, Severity::Error);
+        assert_eq!(config.severity_aa, Severity::Warning);
     }
 }

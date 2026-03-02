@@ -52,7 +52,7 @@ The binary is at `target/release/wcag-lsp`.
 vim.lsp.config("wcag_lsp", {
     cmd = { "/path/to/wcag-lsp" },
     filetypes = { "html", "javascriptreact", "typescriptreact", "vue", "svelte" },
-    root_markers = { ".wcag-lsp.toml", ".git" },
+    root_markers = { ".wcag.toml", ".git" },
 })
 vim.lsp.enable("wcag_lsp")
 ```
@@ -65,7 +65,7 @@ To use a custom server binary instead, set `wcag-lsp.serverPath` in your VS Code
 
 ## Configuration
 
-Create a `.wcag-lsp.toml` file in your project root. All sections are optional -- without a config file, the default settings apply.
+Create a `.wcag.toml` (or `.wcag.json`) file in your project root. All sections are optional -- without a config file, the default settings apply. If both files exist, TOML takes precedence.
 
 ### Full example
 
@@ -82,6 +82,22 @@ no-redundant-alt = "error"
 
 [ignore]
 patterns = ["node_modules/**", "dist/**", "build/**"]
+```
+
+Or equivalently in `.wcag.json`:
+
+```json
+{
+  "severity": { "A": "error", "AA": "warning", "AAA": "warning" },
+  "rules": {
+    "heading-order": "off",
+    "img-alt": "warning",
+    "no-redundant-alt": "error"
+  },
+  "ignore": {
+    "patterns": ["node_modules/**", "dist/**", "build/**"]
+  }
+}
 ```
 
 ### `[severity]` -- WCAG level defaults

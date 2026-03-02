@@ -17,7 +17,7 @@ To use a custom server binary, set `wcag-lsp.serverPath` in your VS Code setting
 
 ## Configuration
 
-Create a `.wcag-lsp.toml` in your project root:
+Create a `.wcag.toml` (or `.wcag.json`) in your project root:
 
 ```toml
 [severity]
@@ -30,6 +30,16 @@ img-alt = "warning"
 
 [ignore]
 patterns = ["node_modules/**", "dist/**"]
+```
+
+Or equivalently in `.wcag.json`:
+
+```json
+{
+  "severity": { "A": "error", "AA": "warning" },
+  "rules": { "heading-order": "off", "img-alt": "warning" },
+  "ignore": { "patterns": ["node_modules/**", "dist/**"] }
+}
 ```
 
 See the [full documentation](https://github.com/maxischmaxi/wcag-lsp) for details.

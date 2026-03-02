@@ -66,8 +66,7 @@ impl LanguageServer for WcagLspServer {
             && let Some(folder) = folders.first()
             && let Some(path) = folder.uri.to_file_path()
         {
-            let config_path = path.join(".wcag-lsp.toml");
-            let config = Config::from_file(&config_path);
+            let config = Config::from_dir(&path);
             *self.config.write().await = config;
         }
 

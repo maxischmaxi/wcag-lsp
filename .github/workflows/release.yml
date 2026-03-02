@@ -58,9 +58,38 @@ jobs:
           name: wcag-lsp-${{ matrix.target }}
           path: wcag-lsp-${{ matrix.target }}.*
 
+  vsix:
+    name: Package VS Code Extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: editors/vscode
+
+      - name: Compile
+        run: npm run compile
+        working-directory: editors/vscode
+
+      - name: Package VSIX
+        run: npx vsce package
+        working-directory: editors/vscode
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: wcag-lsp-vsix
+          path: editors/vscode/*.vsix
+          retention-days: 1
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, vsix]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
