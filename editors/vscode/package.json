@@ -2,7 +2,7 @@
   "name": "wcag-lsp",
   "displayName": "wcag-lsp",
   "description": "Real-time WCAG 2.1 accessibility diagnostics for HTML, JSX, TSX, Vue, Svelte, and more",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "publisher": "maxischmaxi",
   "license": "MIT",
   "icon": "icon.png",
@@ -35,7 +35,7 @@
     "onLanguage:php",
     "onLanguage:erb"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
       "title": "WCAG LSP",
@@ -49,18 +49,19 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "package": "vsce package",
+    "compile": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
+    "package": "npm run compile -- --minify && vsce package",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.75.0",
     "@types/node": "^20.0.0",
-    "typescript": "^5.5.0",
-    "@vscode/vsce": "^3.0.0"
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.5.0"
   }
 }
