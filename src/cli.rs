@@ -183,10 +183,7 @@ mod tests {
         std::fs::write(&file_path, r#"<img src="photo.jpg">"#).unwrap();
 
         let pattern = dir.path().join("*.html").to_string_lossy().to_string();
-        let saved_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
         let code = run_check(&[pattern]);
-        std::env::set_current_dir(saved_dir).unwrap();
 
         assert_eq!(code, 1);
     }
@@ -202,10 +199,7 @@ mod tests {
         .unwrap();
 
         let pattern = dir.path().join("*.html").to_string_lossy().to_string();
-        let saved_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
         let code = run_check(&[pattern]);
-        std::env::set_current_dir(saved_dir).unwrap();
 
         assert_eq!(code, 0);
     }
@@ -215,10 +209,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let pattern = dir.path().join("*.html").to_string_lossy().to_string();
-        let saved_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
         let code = run_check(&[pattern]);
-        std::env::set_current_dir(saved_dir).unwrap();
 
         assert_eq!(code, 0);
     }
