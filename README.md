@@ -59,16 +59,9 @@ vim.lsp.enable("wcag_lsp")
 
 ### VS Code
 
-Add to `.vscode/settings.json`:
+Install the [WCAG Accessibility Linter](https://marketplace.visualstudio.com/items?itemName=maxischmaxi.wcag-lsp) extension from the Marketplace. It downloads the server binary automatically on first use.
 
-```json
-{
-  "lsp.server.wcag-lsp": {
-    "command": "/path/to/wcag-lsp",
-    "languages": ["html", "javascriptreact", "typescriptreact", "vue", "svelte"]
-  }
-}
-```
+To use a custom server binary instead, set `wcag-lsp.serverPath` in your VS Code settings.
 
 ## Configuration
 
