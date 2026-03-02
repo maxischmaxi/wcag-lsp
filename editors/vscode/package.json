@@ -2,9 +2,10 @@
   "name": "wcag-lsp",
   "displayName": "wcag-lsp",
   "description": "Real-time WCAG 2.1 accessibility diagnostics for HTML, JSX, TSX, Vue, Svelte, and more",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "publisher": "maxischmaxi",
   "license": "MIT",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/maxischmaxi/wcag-lsp"

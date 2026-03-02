@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect x="4" y="4" width="120" height="120" rx="20" ry="20" fill="#0D9488"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left leg of A -->
+    <line x1="28" y1="100" x2="58" y2="28"/>
+    <!-- Right leg of A -->
+    <line x1="58" y1="28" x2="76" y2="74"/>
+    <!-- Crossbar of A -->
+    <line x1="38" y1="74" x2="70" y2="74"/>
+    <!-- Checkmark next to A -->
+    <polyline points="72,82 82,94 102,50"/>
+  </g>
+</svg>
