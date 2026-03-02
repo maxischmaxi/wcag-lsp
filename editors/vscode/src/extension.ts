@@ -51,7 +51,13 @@ export async function activate(
     clientOptions,
   );
 
-  await client.start();
+  try {
+    await client.start();
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `WCAG LSP: Failed to start server at "${serverPath}": ${err}`,
+    );
+  }
 }
 
 export async function deactivate(): Promise<void> {

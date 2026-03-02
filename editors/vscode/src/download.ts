@@ -22,9 +22,6 @@ function getPlatformInfo(): PlatformInfo {
     case "linux-x64":
       target = "x86_64-unknown-linux-musl";
       break;
-    case "linux-arm64":
-      target = "aarch64-unknown-linux-musl";
-      break;
     case "darwin-x64":
       target = "x86_64-apple-darwin";
       break;
@@ -70,6 +67,10 @@ async function getLatestVersion(): Promise<string> {
         res.on("end", () => {
           try {
             const json = JSON.parse(data);
+            if (!json.tag_name) {
+              reject(new Error("No tag_name found in GitHub release response"));
+              return;
+            }
             resolve(json.tag_name);
           } catch {
             reject(new Error("Failed to parse GitHub release info"));
@@ -80,13 +81,20 @@ async function getLatestVersion(): Promise<string> {
   });
 }
 
-function downloadFile(url: string): Promise<Buffer> {
+function downloadFile(url: string, maxRedirects = 5): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    if (maxRedirects <= 0) {
+      reject(new Error("Too many redirects"));
+      return;
+    }
     https
       .get(url, { headers: { "User-Agent": "wcag-lsp-vscode" } }, (res) => {
         if (res.statusCode === 302 || res.statusCode === 301) {
           if (res.headers.location) {
-            downloadFile(res.headers.location).then(resolve, reject);
+            downloadFile(res.headers.location, maxRedirects - 1).then(
+              resolve,
+              reject,
+            );
             return;
           }
         }
@@ -164,12 +172,21 @@ async function extractZip(
       .toString("utf8");
 
     if (path.basename(name) === binaryName) {
-      // Read from local header
+      const compressionMethod = archive.readUInt16LE(localHeaderOffset + 8);
       const localNameLen = archive.readUInt16LE(localHeaderOffset + 26);
       const localExtraLen = archive.readUInt16LE(localHeaderOffset + 28);
       const compSize = archive.readUInt32LE(localHeaderOffset + 18);
       const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
-      const data = archive.subarray(dataStart, dataStart + compSize);
+      let data = archive.subarray(dataStart, dataStart + compSize);
+
+      if (compressionMethod === 8) {
+        data = zlib.inflateRawSync(data);
+      } else if (compressionMethod !== 0) {
+        throw new Error(
+          `Unsupported zip compression method: ${compressionMethod}`,
+        );
+      }
+
       const destPath = path.join(destDir, binaryName);
       fs.writeFileSync(destPath, data);
       return destPath;
