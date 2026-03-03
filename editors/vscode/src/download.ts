@@ -136,6 +136,11 @@ async function extractTarGz(
     const fileName = path.basename(name);
     if (fileName === binaryName && size > 0) {
       const destPath = path.join(destDir, binaryName);
+      try {
+        fs.unlinkSync(destPath);
+      } catch {
+        // File may not exist yet
+      }
       fs.writeFileSync(destPath, decompressed.subarray(offset, offset + size));
       fs.chmodSync(destPath, 0o755);
       return destPath;
@@ -189,6 +194,11 @@ async function extractZip(
       }
 
       const destPath = path.join(destDir, binaryName);
+      try {
+        fs.unlinkSync(destPath);
+      } catch {
+        // File may not exist yet
+      }
       fs.writeFileSync(destPath, data);
       return destPath;
     }

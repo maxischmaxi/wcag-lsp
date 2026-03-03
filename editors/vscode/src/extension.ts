@@ -130,6 +130,56 @@ export async function activate(
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("wcag-lsp.updateServer", async () => {
+      try {
+        const updatedPath = await updateBinaryIfNeeded(storageDir);
+        if (!updatedPath) {
+          vscode.window.showInformationMessage(
+            "WCAG LSP: Server is already up to date.",
+          );
+          return;
+        }
+        if (client) {
+          await client.stop();
+          client = undefined;
+        }
+        await startClient(updatedPath);
+        vscode.window.showInformationMessage(
+          "WCAG LSP: Server updated and restarted.",
+        );
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `WCAG LSP: Failed to update server: ${err}`,
+        );
+      }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("wcag-lsp.restartServer", async () => {
+      try {
+        if (client) {
+          await client.stop();
+          client = undefined;
+        }
+
+        const cfg = vscode.workspace.getConfiguration("wcag-lsp");
+        let path = cfg.get<string>("serverPath", "");
+        if (!path) {
+          path = getBinaryPath(storageDir) ?? (await ensureBinary(storageDir));
+        }
+
+        await startClient(path);
+        vscode.window.showInformationMessage("WCAG LSP: Server restarted.");
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `WCAG LSP: Failed to restart server: ${err}`,
+        );
+      }
+    }),
+  );
+
   const config = vscode.workspace.getConfiguration("wcag-lsp");
   let serverPath = config.get<string>("serverPath", "");
 
