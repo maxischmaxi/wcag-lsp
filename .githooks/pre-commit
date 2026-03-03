@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+echo "Running pre-commit checks..."
+
+echo "  cargo fmt --check"
+cargo fmt -- --check
+
+echo "  cargo clippy"
+cargo clippy -- -D warnings
+
+echo "  cargo test"
+cargo test
+
+echo "  vscode extension: npm run lint"
+(cd editors/vscode && npm run lint)
+
+echo "  vscode extension: npm run compile"
+(cd editors/vscode && npm run compile)
+
+echo "All checks passed."
