@@ -213,6 +213,9 @@ fn extract_jsx_attribute(attr_node: &Node, source: &str) -> (Option<String>, Opt
             let trimmed = raw.trim_matches('"').trim_matches('\'');
             value = Some(trimmed.to_string());
         }
+        if child.kind() == "jsx_expression" {
+            value = Some("__JSX_EXPRESSION__".to_string());
+        }
     }
 
     (name, value)
@@ -299,5 +302,27 @@ mod tests {
     fn test_tsx_iframe_with_empty_title_fails() {
         let diags = check_tsx(r#"const App = () => <iframe src="/embed" title="" />;"#);
         assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn test_tsx_iframe_with_expression_title_passes() {
+        let diags = check_tsx(
+            r#"const App = ({url}) => <iframe src={url} title={`Preview for ${url}`} />;"#,
+        );
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_iframe_with_variable_title_passes() {
+        let diags = check_tsx(r#"const App = ({title}) => <iframe src="/embed" title={title} />;"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_iframe_element_with_expression_title_passes() {
+        let diags = check_tsx(
+            r#"const App = ({url}) => <iframe src={url} title={`Preview ${url}`}></iframe>;"#,
+        );
+        assert_eq!(diags.len(), 0);
     }
 }
