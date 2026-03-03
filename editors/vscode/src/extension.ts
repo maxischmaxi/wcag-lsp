@@ -1,31 +1,19 @@
-import * as path from "path";
 import * as vscode from "vscode";
 import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
 } from "vscode-languageclient/node";
-import { ensureBinary } from "./download";
+import {
+  ensureBinary,
+  downloadBinary,
+  getBinaryPath,
+  updateBinaryIfNeeded,
+} from "./download";
 
 let client: LanguageClient | undefined;
 
-export async function activate(
-  context: vscode.ExtensionContext,
-): Promise<void> {
-  const config = vscode.workspace.getConfiguration("wcag-lsp");
-  let serverPath = config.get<string>("serverPath", "");
-
-  if (!serverPath) {
-    try {
-      serverPath = await ensureBinary(context.globalStorageUri.fsPath);
-    } catch (err) {
-      vscode.window.showErrorMessage(
-        `WCAG LSP: Failed to download server: ${err}`,
-      );
-      return;
-    }
-  }
-
+async function startClient(serverPath: string): Promise<void> {
   const serverOptions: ServerOptions = {
     run: { command: serverPath },
     debug: { command: serverPath },
@@ -51,13 +39,89 @@ export async function activate(
     clientOptions,
   );
 
+  await client.start();
+}
+
+export async function activate(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const storageDir = context.globalStorageUri.fsPath;
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("wcag-lsp.installServer", async () => {
+      const existing = getBinaryPath(storageDir);
+
+      if (existing) {
+        const choice = await vscode.window.showInformationMessage(
+          "WCAG LSP: Server is already installed. Reinstall?",
+          "Reinstall",
+          "Cancel",
+        );
+        if (choice !== "Reinstall") {
+          return;
+        }
+      }
+
+      try {
+        const serverPath = await downloadBinary(storageDir);
+        const restart = await vscode.window.showInformationMessage(
+          `WCAG LSP: Server installed at ${serverPath}`,
+          "Restart LSP",
+        );
+        if (restart === "Restart LSP") {
+          if (client) {
+            await client.stop();
+            client = undefined;
+          }
+          await startClient(serverPath);
+        }
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `WCAG LSP: Failed to install server: ${err}`,
+        );
+      }
+    }),
+  );
+
+  const config = vscode.workspace.getConfiguration("wcag-lsp");
+  let serverPath = config.get<string>("serverPath", "");
+
+  if (!serverPath) {
+    try {
+      serverPath = await ensureBinary(storageDir);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `WCAG LSP: Failed to download server: ${err}`,
+      );
+      return;
+    }
+  }
+
   try {
-    await client.start();
+    await startClient(serverPath);
   } catch (err) {
     vscode.window.showErrorMessage(
       `WCAG LSP: Failed to start server at "${serverPath}": ${err}`,
     );
   }
+
+  // Check for updates in the background
+  updateBinaryIfNeeded(storageDir).then(async (updatedPath) => {
+    if (!updatedPath) {
+      return;
+    }
+    const action = await vscode.window.showInformationMessage(
+      "WCAG LSP: A new server version has been installed.",
+      "Restart LSP",
+    );
+    if (action === "Restart LSP") {
+      if (client) {
+        await client.stop();
+        client = undefined;
+      }
+      await startClient(updatedPath);
+    }
+  });
 }
 
 export async function deactivate(): Promise<void> {

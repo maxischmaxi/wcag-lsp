@@ -2,6 +2,7 @@ import * as https from "https";
 import * as fs from "fs";
 import * as path from "path";
 import * as zlib from "zlib";
+import * as cp from "child_process";
 import * as vscode from "vscode";
 
 const REPO = "maxischmaxi/wcag-lsp";
@@ -205,6 +206,41 @@ export async function ensureBinary(storageDir: string): Promise<string> {
     return binaryPath;
   }
 
+  return downloadBinary(storageDir);
+}
+
+export async function updateBinaryIfNeeded(
+  storageDir: string,
+): Promise<string | undefined> {
+  const info = getPlatformInfo();
+  const binaryPath = path.join(storageDir, info.binaryName);
+
+  const installed = fs.existsSync(binaryPath)
+    ? getInstalledVersion(binaryPath)
+    : undefined;
+
+  let latest: string;
+  try {
+    latest = await getLatestVersion();
+  } catch {
+    return undefined;
+  }
+
+  // latest is "v0.5.5", installed is "0.5.5"
+  const latestClean = latest.replace(/^v/, "");
+  if (installed === latestClean) {
+    return undefined;
+  }
+
+  return downloadBinary(storageDir, latest);
+}
+
+export async function downloadBinary(
+  storageDir: string,
+  version?: string,
+): Promise<string> {
+  const info = getPlatformInfo();
+
   const serverPath = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -212,8 +248,10 @@ export async function ensureBinary(storageDir: string): Promise<string> {
       cancellable: false,
     },
     async (progress) => {
-      progress.report({ message: "Fetching latest version..." });
-      const version = await getLatestVersion();
+      if (!version) {
+        progress.report({ message: "Fetching latest version..." });
+        version = await getLatestVersion();
+      }
 
       progress.report({
         message: `Downloading ${version} for ${info.target}...`,
@@ -232,4 +270,24 @@ export async function ensureBinary(storageDir: string): Promise<string> {
   );
 
   return serverPath;
+}
+
+export function getInstalledVersion(binaryPath: string): string | undefined {
+  try {
+    const output = cp.execFileSync(binaryPath, ["--version"], {
+      timeout: 5000,
+      encoding: "utf8",
+    });
+    // output format: "wcag-lsp 0.5.5"
+    const match = output.trim().match(/(\d+\.\d+\.\d+)/);
+    return match ? match[1] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function getBinaryPath(storageDir: string): string | undefined {
+  const info = getPlatformInfo();
+  const binaryPath = path.join(storageDir, info.binaryName);
+  return fs.existsSync(binaryPath) ? binaryPath : undefined;
 }
