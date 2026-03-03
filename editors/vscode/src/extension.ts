@@ -12,6 +12,37 @@ import {
 } from "./download";
 
 let client: LanguageClient | undefined;
+let statusBarItem: vscode.StatusBarItem | undefined;
+
+function updateStatusBar(): void {
+  if (!statusBarItem) {
+    return;
+  }
+
+  const config = vscode.workspace.getConfiguration("wcag-lsp");
+  const showStatusBar = config.get<boolean>("showStatusBar", true);
+
+  if (!showStatusBar) {
+    statusBarItem.hide();
+    return;
+  }
+
+  if (client && client.isRunning()) {
+    const version = client.initializeResult?.serverInfo?.version;
+    if (version) {
+      statusBarItem.text = `$(check) WCAG LSP v${version}`;
+      statusBarItem.tooltip = `WCAG LSP Server v${version} — Running`;
+    } else {
+      statusBarItem.text = `$(check) WCAG LSP`;
+      statusBarItem.tooltip = `WCAG LSP Server — Running`;
+    }
+  } else {
+    statusBarItem.text = `$(sync~spin) WCAG LSP Starting...`;
+    statusBarItem.tooltip = `WCAG LSP Server — Starting`;
+  }
+
+  statusBarItem.show();
+}
 
 async function startClient(serverPath: string): Promise<void> {
   const serverOptions: ServerOptions = {
@@ -39,13 +70,29 @@ async function startClient(serverPath: string): Promise<void> {
     clientOptions,
   );
 
+  updateStatusBar();
   await client.start();
+  updateStatusBar();
 }
 
 export async function activate(
   context: vscode.ExtensionContext,
 ): Promise<void> {
   const storageDir = context.globalStorageUri.fsPath;
+
+  statusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    0,
+  );
+  context.subscriptions.push(statusBarItem);
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("wcag-lsp.showStatusBar")) {
+        updateStatusBar();
+      }
+    }),
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("wcag-lsp.installServer", async () => {
