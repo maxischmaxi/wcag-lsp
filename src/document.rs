@@ -64,8 +64,7 @@ impl DocumentManager {
         }
 
         let parser = self.parsers.get_mut(&file_type)?;
-        let old_tree = self.documents.get(uri).map(|d| &d.tree);
-        let tree = parser.parse(&text, old_tree)?;
+        let tree = parser.parse(&text, None)?;
 
         let doc = self.documents.get_mut(uri)?;
         doc.source = text;
@@ -117,6 +116,52 @@ mod tests {
         let doc = doc.unwrap();
         assert_eq!(doc.version, 2);
         assert_eq!(doc.source, "<img alt=\"hi\">");
+    }
+
+    #[test]
+    fn test_update_produces_correct_tree() {
+        use crate::engine;
+        use crate::rules;
+
+        let mut mgr = DocumentManager::new();
+        let config = crate::config::Config::default();
+        let all_rules = rules::all_rules();
+
+        // Open with a violation: <img> without alt
+        mgr.open(
+            "file:///test.html".to_string(),
+            "<img src=\"pic.jpg\">".to_string(),
+            1,
+        );
+        let doc = mgr.get("file:///test.html").unwrap();
+        let diags = engine::run_diagnostics(doc, &all_rules, &config);
+        assert!(
+            !diags.is_empty(),
+            "should have diagnostics for <img> without alt"
+        );
+
+        // Fix: add alt attribute
+        mgr.update(
+            "file:///test.html",
+            "<img src=\"pic.jpg\" alt=\"A photo\">".to_string(),
+            2,
+        );
+        let doc = mgr.get("file:///test.html").unwrap();
+        let diags = engine::run_diagnostics(doc, &all_rules, &config);
+        let img_alt_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.code
+                    == Some(tower_lsp_server::ls_types::NumberOrString::String(
+                        "img-alt".to_string(),
+                    ))
+            })
+            .collect();
+        assert!(
+            img_alt_diags.is_empty(),
+            "diagnostics should clear after fix, got: {:?}",
+            img_alt_diags
+        );
     }
 
     #[test]
