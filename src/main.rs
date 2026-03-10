@@ -15,12 +15,24 @@ async fn main() {
     }
 
     if args.get(1).map(|s| s.as_str()) == Some("check") {
-        let patterns: Vec<String> = args[2..].to_vec();
+        let rest = &args[2..];
+        let mut config_path: Option<&str> = None;
+        let mut patterns: Vec<String> = Vec::new();
+        let mut i = 0;
+        while i < rest.len() {
+            if (rest[i] == "--config" || rest[i] == "-c") && i + 1 < rest.len() {
+                config_path = Some(&rest[i + 1]);
+                i += 2;
+            } else {
+                patterns.push(rest[i].clone());
+                i += 1;
+            }
+        }
         if patterns.is_empty() {
-            eprintln!("Usage: wcag-lsp check <patterns...>");
+            eprintln!("Usage: wcag-lsp check [--config <path>] <patterns...>");
             std::process::exit(1);
         }
-        std::process::exit(wcag_lsp::cli::run_check(&patterns));
+        std::process::exit(wcag_lsp::cli::run_check_with_config(&patterns, config_path));
     }
 
     if args.iter().any(|a| a == "--self-update") {
@@ -47,12 +59,15 @@ USAGE:
     wcag-lsp [OPTIONS] [COMMAND]
 
 COMMANDS:
-    check <patterns...>    Lint files matching glob patterns
+    check [--config <path>] <patterns...>
+                           Lint files matching glob patterns
                            Example: wcag-lsp check \"src/**/*.tsx\" \"**/*.html\"
+                           Example: wcag-lsp check --config .wcag.toml \"src/**/*.html\"
 
 OPTIONS:
     -h, --help             Show this help message
     -v, --version          Print version
+    -c, --config <path>    Path to .wcag.toml or .wcag.json config file
         --self-update      Update to latest release",
         env!("CARGO_PKG_VERSION")
     );

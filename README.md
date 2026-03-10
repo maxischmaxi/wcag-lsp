@@ -61,7 +61,17 @@ vim.lsp.enable("wcag_lsp")
 
 Install the [WCAG Accessibility Linter](https://marketplace.visualstudio.com/items?itemName=maxischmaxi.wcag-lsp) extension from the Marketplace. It downloads the server binary automatically on first use.
 
-To use a custom server binary instead, set `wcag-lsp.serverPath` in your VS Code settings.
+To use a custom config file, set `wcag-lsp.configPath` in your VS Code settings. To use a custom server binary, set `wcag-lsp.serverPath`.
+
+## CLI Usage
+
+```sh
+# Lint files (uses .wcag.toml/.wcag.json from current directory)
+wcag-lsp check "src/**/*.html" "**/*.tsx"
+
+# Lint files with a custom config file
+wcag-lsp check --config path/to/.wcag.toml "src/**/*.html"
+```
 
 ## Configuration
 
@@ -88,6 +98,7 @@ Or equivalently in `.wcag.json`:
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/wcag-lsp/main/wcag-lsp.schema.json",
   "severity": { "A": "error", "AA": "warning", "AAA": "warning" },
   "rules": {
     "heading-order": "off",
@@ -104,17 +115,19 @@ Or equivalently in `.wcag.json`:
 
 Controls the default diagnostic severity for all rules of a given WCAG conformance level.
 
-| Key   | Values                 | Default     |
-| ----- | ---------------------- | ----------- |
-| `A`   | `"error"`, `"warning"` | `"error"`   |
-| `AA`  | `"error"`, `"warning"` | `"warning"` |
-| `AAA` | `"error"`, `"warning"` | `"warning"` |
+| Key   | Values                              | Default     |
+| ----- | ----------------------------------- | ----------- |
+| `A`   | `"error"`, `"warning"`, `"off"` | `"error"`   |
+| `AA`  | `"error"`, `"warning"`, `"off"` | `"warning"` |
+| `AAA` | `"error"`, `"warning"`, `"off"` | `"warning"` |
+
+Set a level to `"off"` (or `"false"` / `"disable"`) to skip all rules of that level entirely.
 
 ```toml
 [severity]
 A = "error"      # Level A violations are errors (default)
 AA = "error"     # Treat Level AA as errors too
-AAA = "warning"  # Level AAA stays as warnings (default)
+AAA = "off"      # Disable all Level AAA checks
 ```
 
 ### `[rules]` -- Per-rule overrides

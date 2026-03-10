@@ -61,8 +61,19 @@ impl WcagLspServer {
 
 impl LanguageServer for WcagLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        // Try to load config from workspace root
-        if let Some(folders) = &params.workspace_folders
+        // Check for custom config path from initializationOptions
+        let custom_config = params
+            .initialization_options
+            .as_ref()
+            .and_then(|opts| opts.get("configPath"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from);
+
+        if let Some(config_path) = custom_config {
+            let config = Config::from_file(&config_path);
+            *self.config.write().await = config;
+        } else if let Some(folders) = &params.workspace_folders
             && let Some(folder) = folders.first()
             && let Some(path) = folder.uri.to_file_path()
         {

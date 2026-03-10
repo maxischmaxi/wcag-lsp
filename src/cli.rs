@@ -16,8 +16,16 @@ struct FileDiagnostic {
 }
 
 pub fn run_check(patterns: &[String]) -> i32 {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let config = Config::from_dir(&cwd);
+    run_check_with_config(patterns, None)
+}
+
+pub fn run_check_with_config(patterns: &[String], config_path: Option<&str>) -> i32 {
+    let config = if let Some(path) = config_path {
+        Config::from_file(std::path::Path::new(path))
+    } else {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        Config::from_dir(&cwd)
+    };
     let rules = rules::all_rules();
 
     let mut all_files: Vec<std::path::PathBuf> = Vec::new();

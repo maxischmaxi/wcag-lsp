@@ -50,6 +50,9 @@ async function startClient(serverPath: string): Promise<void> {
     debug: { command: serverPath },
   };
 
+  const config = vscode.workspace.getConfiguration("wcag-lsp");
+  const configPath = config.get<string>("configPath", "");
+
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
       { scheme: "file", language: "html" },
@@ -61,6 +64,9 @@ async function startClient(serverPath: string): Promise<void> {
       { scheme: "file", language: "php" },
       { scheme: "file", language: "erb" },
     ],
+    initializationOptions: {
+      configPath: configPath || undefined,
+    },
   };
 
   client = new LanguageClient(

@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/maxischmaxi/wcag-lsp/main/wcag-lsp.schema.json",
+  "title": "wcag-lsp Configuration",
+  "description": "Configuration file for wcag-lsp, a WCAG accessibility linter.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to the JSON schema."
+    },
+    "severity": {
+      "type": "object",
+      "description": "Default diagnostic severity for each WCAG conformance level.",
+      "additionalProperties": false,
+      "properties": {
+        "A": {
+          "$ref": "#/$defs/levelSeverity",
+          "description": "Severity for WCAG Level A rules.",
+          "default": "error"
+        },
+        "AA": {
+          "$ref": "#/$defs/levelSeverity",
+          "description": "Severity for WCAG Level AA rules.",
+          "default": "warning"
+        },
+        "AAA": {
+          "$ref": "#/$defs/levelSeverity",
+          "description": "Severity for WCAG Level AAA rules.",
+          "default": "warning"
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "description": "Per-rule severity overrides. Takes precedence over the severity section.",
+      "additionalProperties": false,
+      "properties": {
+        "anchor-content": { "$ref": "#/$defs/ruleSeverity" },
+        "area-alt": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-allowed-attr": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-deprecated-role": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-hidden-body": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-hidden-focus": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-prohibited-attr": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-props": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-required-attr": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-required-children": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-required-parent": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-role": { "$ref": "#/$defs/ruleSeverity" },
+        "aria-valid-attr-value": { "$ref": "#/$defs/ruleSeverity" },
+        "autocomplete-valid": { "$ref": "#/$defs/ruleSeverity" },
+        "button-name": { "$ref": "#/$defs/ruleSeverity" },
+        "click-events-have-key-events": { "$ref": "#/$defs/ruleSeverity" },
+        "form-label": { "$ref": "#/$defs/ruleSeverity" },
+        "heading-content": { "$ref": "#/$defs/ruleSeverity" },
+        "heading-order": { "$ref": "#/$defs/ruleSeverity" },
+        "html-lang": { "$ref": "#/$defs/ruleSeverity" },
+        "iframe-title": { "$ref": "#/$defs/ruleSeverity" },
+        "img-alt": { "$ref": "#/$defs/ruleSeverity" },
+        "input-image-alt": { "$ref": "#/$defs/ruleSeverity" },
+        "lang-valid": { "$ref": "#/$defs/ruleSeverity" },
+        "list-structure": { "$ref": "#/$defs/ruleSeverity" },
+        "media-captions": { "$ref": "#/$defs/ruleSeverity" },
+        "meta-refresh": { "$ref": "#/$defs/ruleSeverity" },
+        "mouse-events-have-key-events": { "$ref": "#/$defs/ruleSeverity" },
+        "nested-interactive": { "$ref": "#/$defs/ruleSeverity" },
+        "no-access-key": { "$ref": "#/$defs/ruleSeverity" },
+        "no-autoplay": { "$ref": "#/$defs/ruleSeverity" },
+        "no-distracting-elements": { "$ref": "#/$defs/ruleSeverity" },
+        "no-duplicate-id": { "$ref": "#/$defs/ruleSeverity" },
+        "no-positive-tabindex": { "$ref": "#/$defs/ruleSeverity" },
+        "no-redundant-alt": { "$ref": "#/$defs/ruleSeverity" },
+        "no-redundant-roles": { "$ref": "#/$defs/ruleSeverity" },
+        "object-alt": { "$ref": "#/$defs/ruleSeverity" },
+        "page-title": { "$ref": "#/$defs/ruleSeverity" },
+        "scope-attr": { "$ref": "#/$defs/ruleSeverity" },
+        "table-header": { "$ref": "#/$defs/ruleSeverity" }
+      }
+    },
+    "ignore": {
+      "type": "object",
+      "description": "File ignore configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "patterns": {
+          "type": "array",
+          "description": "Glob patterns for files that should not be checked.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["node_modules/**", "dist/**", "build/**"]]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "levelSeverity": {
+      "type": "string",
+      "enum": ["error", "warning", "warn", "off", "false", "disable"],
+      "description": "Severity level for a WCAG conformance level. Use \"off\" to disable all rules of this level."
+    },
+    "ruleSeverity": {
+      "type": "string",
+      "enum": ["error", "warning", "warn", "off", "false", "disable"],
+      "description": "Severity for an individual rule. Use \"off\" to disable the rule entirely."
+    }
+  }
+}

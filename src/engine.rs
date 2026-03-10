@@ -11,10 +11,10 @@ pub fn run_diagnostics(
     let mut diagnostics = Vec::new();
     for rule in rules {
         let meta = rule.metadata();
-        if !config.is_rule_enabled(meta.id) {
-            continue;
-        }
-        let severity = config.effective_severity(meta.id, meta.wcag_level);
+        let severity = match config.effective_severity(meta.id, meta.wcag_level) {
+            Some(s) => s,
+            None => continue,
+        };
         let lsp_severity = match severity {
             Severity::Error => DiagnosticSeverity::ERROR,
             Severity::Warning => DiagnosticSeverity::WARNING,
