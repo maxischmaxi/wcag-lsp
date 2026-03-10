@@ -92,6 +92,7 @@ impl LanguageServer for WcagLspServer {
                 name: "wcag-lsp".to_string(),
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
+            offset_encoding: None,
         })
     }
 
