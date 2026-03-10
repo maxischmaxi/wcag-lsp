@@ -1986,7 +1986,7 @@ dependencies = [
 
 [[package]]
 name = "wcag-lsp"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "flate2",
  "glob",

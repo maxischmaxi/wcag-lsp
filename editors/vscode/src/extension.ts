@@ -13,6 +13,8 @@ import {
 
 let client: LanguageClient | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
+let configWatchers: vscode.FileSystemWatcher[] = [];
+let restartDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 function updateStatusBar(): void {
   if (!statusBarItem) {
@@ -81,6 +83,101 @@ async function startClient(serverPath: string): Promise<void> {
   updateStatusBar();
 }
 
+function isValidConfig(content: string, filePath: string): boolean {
+  if (filePath.endsWith(".json")) {
+    try {
+      JSON.parse(content);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  // For TOML, accept any non-empty content — the server handles invalid TOML gracefully
+  return content.trim().length > 0;
+}
+
+function getServerPath(storageDir: string): string | undefined {
+  const cfg = vscode.workspace.getConfiguration("wcag-lsp");
+  const path = cfg.get<string>("serverPath", "");
+  return path || getBinaryPath(storageDir) || undefined;
+}
+
+async function restartServer(storageDir: string): Promise<void> {
+  if (client) {
+    await client.stop();
+    client = undefined;
+  }
+
+  let serverPath = getServerPath(storageDir);
+  if (!serverPath) {
+    serverPath = await ensureBinary(storageDir);
+  }
+
+  await startClient(serverPath);
+  updateStatusBar();
+}
+
+function handleConfigChange(uri: vscode.Uri, storageDir: string): void {
+  if (restartDebounceTimer) {
+    clearTimeout(restartDebounceTimer);
+  }
+
+  restartDebounceTimer = setTimeout(async () => {
+    try {
+      const content = await vscode.workspace.fs.readFile(uri);
+      const text = Buffer.from(content).toString("utf-8");
+
+      if (!isValidConfig(text, uri.fsPath)) {
+        return;
+      }
+
+      await restartServer(storageDir);
+    } catch {
+      // File might have been deleted, ignore
+    }
+  }, 500);
+}
+
+function setupConfigWatchers(
+  context: vscode.ExtensionContext,
+  storageDir: string,
+): void {
+  // Dispose old watchers
+  for (const w of configWatchers) {
+    w.dispose();
+  }
+  configWatchers = [];
+
+  const cfg = vscode.workspace.getConfiguration("wcag-lsp");
+  const configPath = cfg.get<string>("configPath", "");
+
+  if (configPath) {
+    // Watch the specific config file
+    const pattern = new vscode.RelativePattern(
+      vscode.workspace.workspaceFolders?.[0] ?? "",
+      configPath,
+    );
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+    watcher.onDidChange((uri) => handleConfigChange(uri, storageDir));
+    watcher.onDidCreate((uri) => handleConfigChange(uri, storageDir));
+    configWatchers.push(watcher);
+    context.subscriptions.push(watcher);
+  } else {
+    // Watch .wcag.toml and .wcag.json in workspace root
+    for (const filename of [".wcag.toml", ".wcag.json"]) {
+      const pattern = new vscode.RelativePattern(
+        vscode.workspace.workspaceFolders?.[0] ?? "",
+        filename,
+      );
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      watcher.onDidChange((uri) => handleConfigChange(uri, storageDir));
+      watcher.onDidCreate((uri) => handleConfigChange(uri, storageDir));
+      configWatchers.push(watcher);
+      context.subscriptions.push(watcher);
+    }
+  }
+}
+
 export async function activate(
   context: vscode.ExtensionContext,
 ): Promise<void> {
@@ -96,6 +193,10 @@ export async function activate(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("wcag-lsp.showStatusBar")) {
         updateStatusBar();
+      }
+      if (e.affectsConfiguration("wcag-lsp.configPath")) {
+        setupConfigWatchers(context, storageDir);
+        restartServer(storageDir).catch(() => {});
       }
     }),
   );
@@ -207,6 +308,9 @@ export async function activate(
       `WCAG LSP: Failed to start server at "${serverPath}": ${err}`,
     );
   }
+
+  // Watch config files for changes
+  setupConfigWatchers(context, storageDir);
 
   // Check for updates in the background
   updateBinaryIfNeeded(storageDir).then(async (updatedPath) => {
