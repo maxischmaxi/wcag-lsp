@@ -8,6 +8,7 @@ Real-time WCAG 2.1/2.2 accessibility diagnostics for HTML, JSX, TSX, Vue, Svelte
 - Real-time diagnostics as you type
 - Configurable severity levels and per-rule overrides
 - Supports HTML, JSX, TSX, Vue, Svelte, Astro, PHP, ERB
+- Inline `wcag-disable`, `wcag-disable-line`, and `wcag-disable-next-line` directives
 
 ## Setup
 
@@ -64,5 +65,23 @@ By default, wcag-lsp looks for `.wcag.toml` or `.wcag.json` in your project root
 ### Custom Server Binary
 
 To use a custom server binary, set `wcag-lsp.serverPath` in your VS Code settings.
+
+## Inline disable directives
+
+Use comment directives for local suppressions:
+
+```html
+<!-- wcag-disable AA img-alt -->
+<!-- wcag-disable-line img-alt --><img src="photo.jpg" />
+<!-- wcag-disable-next-line img-alt -->
+```
+
+```tsx
+/* wcag-disable */
+/* wcag-disable-line img-alt */ <img src="photo.jpg" />
+// wcag-disable-next-line img-alt
+```
+
+`wcag-disable` works file-wide only when it appears in the comment header at the top of the file.
 
 See the [full documentation](https://github.com/maxischmaxi/wcag-lsp) for details.

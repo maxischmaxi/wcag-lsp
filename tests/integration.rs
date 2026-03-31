@@ -186,3 +186,126 @@ fn test_clean_html_no_diagnostics() {
         diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_inline_disable_file_wide_suppresses_all_diagnostics() {
+    let mut mgr = DocumentManager::new();
+    let html = r#"<!-- wcag-disable -->
+<html>
+<body>
+  <img src="photo.jpg">
+  <a href="/"></a>
+</body>
+</html>"#;
+
+    let doc = mgr
+        .open("file:///disabled.html".to_string(), html.to_string(), 1)
+        .unwrap();
+    let rules = rules::all_rules();
+    let config = Config::default();
+    let diagnostics = engine::run_diagnostics(doc, &rules, &config);
+
+    assert!(
+        diagnostics.is_empty(),
+        "file-wide disable should suppress all diagnostics"
+    );
+}
+
+#[test]
+fn test_inline_disable_file_wide_can_target_level_and_rule() {
+    let mut mgr = DocumentManager::new();
+    let html = r#"<!-- wcag-disable AA img-alt -->
+<html>
+<body>
+  <h2></h2>
+  <img src="photo.jpg">
+  <a href="/"></a>
+</body>
+</html>"#;
+
+    let doc = mgr
+        .open(
+            "file:///partially-disabled.html".to_string(),
+            html.to_string(),
+            1,
+        )
+        .unwrap();
+    let rules = rules::all_rules();
+    let config = Config::default();
+    let diagnostics = engine::run_diagnostics(doc, &rules, &config);
+
+    let codes: Vec<String> = diagnostics
+        .iter()
+        .filter_map(|d| d.code.as_ref())
+        .map(|c| match c {
+            NumberOrString::String(s) => s.clone(),
+            NumberOrString::Number(n) => n.to_string(),
+        })
+        .collect();
+
+    assert!(!codes.contains(&"img-alt".to_string()));
+    assert!(!codes.contains(&"heading-content".to_string()));
+    assert!(codes.contains(&"anchor-content".to_string()));
+    assert!(codes.contains(&"html-lang".to_string()));
+}
+
+#[test]
+fn test_inline_disable_next_line_suppresses_only_targeted_rule() {
+    let mut mgr = DocumentManager::new();
+    let html = r#"<html>
+<body>
+  <!-- wcag-disable-next-line img-alt -->
+  <img src="photo.jpg">
+  <img src="photo2.jpg">
+</body>
+</html>"#;
+
+    let doc = mgr
+        .open("file:///next-line.html".to_string(), html.to_string(), 1)
+        .unwrap();
+    let rules = rules::all_rules();
+    let config = Config::default();
+    let diagnostics = engine::run_diagnostics(doc, &rules, &config);
+
+    let img_alt_diags: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("img-alt".to_string())))
+        .collect();
+
+    assert_eq!(
+        img_alt_diags.len(),
+        1,
+        "only one img-alt diagnostic should remain"
+    );
+    assert_eq!(img_alt_diags[0].range.start.line, 4);
+}
+
+#[test]
+fn test_inline_disable_line_suppresses_only_current_line() {
+    let mut mgr = DocumentManager::new();
+    let html = r#"<html>
+<body>
+  <!-- wcag-disable-line img-alt --><img src="photo.jpg">
+  <img src="photo2.jpg">
+</body>
+</html>"#;
+
+    let doc = mgr
+        .open("file:///disable-line.html".to_string(), html.to_string(), 1)
+        .unwrap();
+    let rules = rules::all_rules();
+    let config = Config::default();
+    let diagnostics = engine::run_diagnostics(doc, &rules, &config);
+
+    let img_alt_diags: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("img-alt".to_string())))
+        .collect();
+
+    assert_eq!(
+        img_alt_diags.len(),
+        1,
+        "only one img-alt diagnostic should remain"
+    );
+    assert_eq!(img_alt_diags[0].range.start.line, 3);
+}

@@ -11,6 +11,7 @@ Built with Rust and [tree-sitter](https://tree-sitter.github.io/) for incrementa
 - Supports HTML, JSX, TSX, Vue, Svelte, Astro, PHP, ERB, Handlebars, and Twig
 - Configurable severity levels and per-rule overrides
 - Glob-based file ignore patterns
+- Inline `wcag-disable` and `wcag-disable-next-line` directives
 
 ## Installation
 
@@ -115,8 +116,8 @@ Or equivalently in `.wcag.json`:
 
 Controls the default diagnostic severity for all rules of a given WCAG conformance level.
 
-| Key   | Values                              | Default     |
-| ----- | ----------------------------------- | ----------- |
+| Key   | Values                          | Default     |
+| ----- | ------------------------------- | ----------- |
 | `A`   | `"error"`, `"warning"`, `"off"` | `"error"`   |
 | `AA`  | `"error"`, `"warning"`, `"off"` | `"warning"` |
 | `AAA` | `"error"`, `"warning"`, `"off"` | `"warning"` |
@@ -161,6 +162,42 @@ patterns = [
     "**/fixtures/**",
 ]
 ```
+
+### Inline disable directives
+
+Use comment directives when you need to suppress diagnostics in a single file, on the current line, or on the next line only.
+
+- `wcag-disable` at the top of a file disables matching diagnostics for the whole file
+- `wcag-disable-line` disables matching diagnostics on the same line
+- `wcag-disable-next-line` disables matching diagnostics on the next line only
+- Selectors can be omitted to disable everything, or limited to WCAG levels (`A`, `AA`, `AAA`) and rule IDs like `img-alt`
+
+HTML, Vue, Svelte, Astro, PHP, ERB, Handlebars, and Twig:
+
+```html
+<!-- wcag-disable -->
+<!-- wcag-disable AA img-alt -->
+<!-- wcag-disable-line img-alt --><img src="photo.jpg" />
+<!-- wcag-disable-next-line img-alt -->
+<img src="photo.jpg" />
+```
+
+JSX / TSX:
+
+```tsx
+/* wcag-disable */
+/* wcag-disable AA img-alt */
+/* wcag-disable-line img-alt */ <img src="photo.jpg" />;
+// wcag-disable-next-line img-alt
+<img src="photo.jpg" />;
+
+{
+  /* wcag-disable-next-line img-alt */
+}
+<img src="photo.jpg" />;
+```
+
+`wcag-disable` is only treated as file-wide when it appears in the comment header before the first real content in the file.
 
 ## Rules
 
