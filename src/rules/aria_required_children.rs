@@ -254,21 +254,29 @@ fn check_jsx_element(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic
         None => return,
     };
 
-    // Scan direct child jsx_element and jsx_self_closing_element nodes
-    let mut found_required = false;
-    let mut has_child_elements = false;
-
+    // Collect effective child elements. Besides literal child elements, JSX
+    // renders elements produced inside expression containers such as
+    // `{items.map(x => <Option/>)}`, `{cond && <Option/>}` or ternaries, so we
+    // descend into jsx_expression children to find those too.
+    let mut effective_children: Vec<Node> = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "jsx_element" || child.kind() == "jsx_self_closing_element" {
-            has_child_elements = true;
-            let child_role = get_jsx_child_role(&child, source);
-            if let Some(ref cr) = child_role
-                && required_children.iter().any(|r| r == cr)
-            {
-                found_required = true;
-                break;
-            }
+        match child.kind() {
+            "jsx_element" | "jsx_self_closing_element" => effective_children.push(child),
+            "jsx_expression" => collect_expression_jsx(&child, &mut effective_children),
+            _ => {}
+        }
+    }
+
+    let has_child_elements = !effective_children.is_empty();
+    let mut found_required = false;
+    for child in &effective_children {
+        let child_role = get_jsx_child_role(child, source);
+        if let Some(ref cr) = child_role
+            && required_children.iter().any(|r| r == cr)
+        {
+            found_required = true;
+            break;
         }
     }
 
@@ -305,6 +313,23 @@ fn get_jsx_role_from_attrs(node: &Node, source: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Collect the "top-level" JSX elements produced inside an expression container.
+///
+/// Handles the common React patterns where children are generated dynamically,
+/// e.g. `{items.map(x => <Option/>)}`, `{cond && <Option/>}` or ternaries. The
+/// walk stops descending as soon as it reaches a concrete JSX element, so we
+/// only collect the elements that would render as direct children of the parent
+/// — not their own descendants.
+fn collect_expression_jsx<'a>(node: &Node<'a>, out: &mut Vec<Node<'a>>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "jsx_element" | "jsx_self_closing_element" => out.push(child),
+            _ => collect_expression_jsx(&child, out),
+        }
+    }
 }
 
 fn get_jsx_child_role(node: &Node, source: &str) -> Option<String> {
@@ -456,6 +481,30 @@ mod tests {
             r#"const App = () => <div role="list"><div role="listitem">item</div></div>;"#,
         );
         assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_listbox_with_mapped_options_passes() {
+        let diags = check_tsx(
+            r#"const App = () => <div role="listbox">{items.map((p, i) => (<div role="option" key={i}>{p.label}</div>))}</div>;"#,
+        );
+        assert_eq!(diags.len(), 0, "mapped options should satisfy listbox, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_tsx_listbox_with_conditional_option_passes() {
+        let diags = check_tsx(
+            r#"const App = () => <div role="listbox">{show && <div role="option">x</div>}</div>;"#,
+        );
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_tsx_listbox_with_mapped_non_options_fails() {
+        let diags = check_tsx(
+            r#"const App = () => <div role="listbox">{items.map((p) => (<div>{p.label}</div>))}</div>;"#,
+        );
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

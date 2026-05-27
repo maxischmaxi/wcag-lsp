@@ -51,11 +51,40 @@ impl Rule for NestedInteractive {
     fn check(&self, root: &Node, source: &str, file_type: FileType) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         if file_type.is_jsx_like() {
-            visit_jsx(root, source, &mut diagnostics, false);
+            visit_jsx(root, source, &mut diagnostics, None);
         } else {
-            visit_html(root, source, &mut diagnostics, false);
+            visit_html(root, source, &mut diagnostics, None);
         }
         diagnostics
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Composite widgets
+// ---------------------------------------------------------------------------
+
+/// Roles that act as composite-widget containers, mapped to the interactive
+/// child roles they are expected to own. A child with one of these roles nested
+/// inside the matching container is a valid ARIA pattern (e.g. `option` inside
+/// `listbox`) and must not be reported as nested-interactive.
+fn composite_children(parent_role: &str) -> &'static [&'static str] {
+    match parent_role {
+        "listbox" | "combobox" => &["option"],
+        "menu" | "menubar" => &["menuitem", "menuitemcheckbox", "menuitemradio"],
+        "tablist" => &["tab"],
+        "tree" => &["treeitem"],
+        "treegrid" | "grid" => &["row", "gridcell", "rowheader", "columnheader"],
+        "radiogroup" => &["radio"],
+        "row" => &["gridcell", "columnheader", "rowheader", "cell"],
+        _ => &[],
+    }
+}
+
+/// Whether `child_role` is an expected composite child of `parent_role`.
+fn composite_allows(parent_role: &str, child_role: Option<&str>) -> bool {
+    match child_role {
+        Some(cr) => composite_children(parent_role).contains(&cr),
+        None => false,
     }
 }
 
@@ -182,6 +211,24 @@ fn is_html_interactive(element: &Node, source: &str) -> bool {
     false
 }
 
+/// The explicit interactive ARIA role of an HTML element, if any.
+fn html_interactive_role(element: &Node, source: &str) -> Option<String> {
+    let role = get_html_attr_value(element, source, "role")?;
+    let r = role.trim().to_ascii_lowercase();
+    INTERACTIVE_ROLES.iter().any(|x| *x == r).then_some(r)
+}
+
+/// An identifier for an interactive element used as the parent context when
+/// recursing: its interactive ARIA role if it has one, otherwise its tag name.
+/// Returns `None` for non-interactive elements.
+fn html_interactive_identity(element: &Node, source: &str) -> Option<String> {
+    if !is_html_interactive(element, source) {
+        return None;
+    }
+    html_interactive_role(element, source)
+        .or_else(|| get_html_tag_name(element, source).map(|t| t.to_ascii_lowercase()))
+}
+
 // ---------------------------------------------------------------------------
 // HTML visitor
 // ---------------------------------------------------------------------------
@@ -190,32 +237,32 @@ fn visit_html(
     node: &Node,
     source: &str,
     diagnostics: &mut Vec<Diagnostic>,
-    inside_interactive: bool,
+    parent_role: Option<&str>,
 ) {
     if node.kind() == "element" {
-        let interactive = is_html_interactive(node, source);
+        let identity = html_interactive_identity(node, source);
+        let role = html_interactive_role(node, source);
 
-        if inside_interactive && interactive {
+        if let Some(parent) = parent_role
+            && identity.is_some()
+            && !composite_allows(parent, role.as_deref())
+        {
             diagnostics.push(make_diagnostic(node));
-            // Still recurse children with inside_interactive = true
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                visit_html(&child, source, diagnostics, true);
-            }
-            return;
         }
 
-        let new_flag = inside_interactive || interactive;
+        // The current element becomes the parent context for its descendants
+        // when it is interactive; otherwise the existing context carries on.
+        let child_role = identity.as_deref().or(parent_role);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            visit_html(&child, source, diagnostics, new_flag);
+            visit_html(&child, source, diagnostics, child_role);
         }
         return;
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        visit_html(&child, source, diagnostics, inside_interactive);
+        visit_html(&child, source, diagnostics, parent_role);
     }
 }
 
@@ -329,6 +376,25 @@ fn is_jsx_interactive(opening: &Node, source: &str) -> bool {
     false
 }
 
+/// The explicit interactive ARIA role declared on a JSX opening/self-closing
+/// element node, if any.
+fn jsx_interactive_role(opening: &Node, source: &str) -> Option<String> {
+    let role = get_jsx_attr_value(opening, source, "role")?;
+    let r = role.trim().to_ascii_lowercase();
+    INTERACTIVE_ROLES.iter().any(|x| *x == r).then_some(r)
+}
+
+/// An identifier for an interactive JSX element used as the parent context:
+/// its interactive ARIA role if it has one, otherwise its tag name. Returns
+/// `None` for non-interactive elements (and custom components).
+fn jsx_interactive_identity(opening: &Node, source: &str) -> Option<String> {
+    if !is_jsx_interactive(opening, source) {
+        return None;
+    }
+    jsx_interactive_role(opening, source)
+        .or_else(|| get_jsx_tag_name_from_opening(opening, source).map(|t| t.to_ascii_lowercase()))
+}
+
 // ---------------------------------------------------------------------------
 // JSX visitor
 // ---------------------------------------------------------------------------
@@ -337,7 +403,7 @@ fn visit_jsx(
     node: &Node,
     source: &str,
     diagnostics: &mut Vec<Diagnostic>,
-    inside_interactive: bool,
+    parent_role: Option<&str>,
 ) {
     match node.kind() {
         "jsx_element" => {
@@ -351,31 +417,32 @@ fn visit_jsx(
                 }
             }
 
-            let interactive = opening
+            let identity = opening
                 .as_ref()
-                .map(|o| is_jsx_interactive(o, source))
-                .unwrap_or(false);
+                .and_then(|o| jsx_interactive_identity(o, source));
+            let role = opening.as_ref().and_then(|o| jsx_interactive_role(o, source));
 
-            if inside_interactive && interactive {
+            if let Some(parent) = parent_role
+                && identity.is_some()
+                && !composite_allows(parent, role.as_deref())
+            {
                 diagnostics.push(make_diagnostic(node));
-                // Still recurse children
-                let mut cursor2 = node.walk();
-                for child in node.children(&mut cursor2) {
-                    visit_jsx(&child, source, diagnostics, true);
-                }
-                return;
             }
 
-            let new_flag = inside_interactive || interactive;
+            let child_role = identity.as_deref().or(parent_role);
             let mut cursor2 = node.walk();
             for child in node.children(&mut cursor2) {
-                visit_jsx(&child, source, diagnostics, new_flag);
+                visit_jsx(&child, source, diagnostics, child_role);
             }
         }
         "jsx_self_closing_element" => {
-            let interactive = is_jsx_interactive(node, source);
+            let identity = jsx_interactive_identity(node, source);
+            let role = jsx_interactive_role(node, source);
 
-            if inside_interactive && interactive {
+            if let Some(parent) = parent_role
+                && identity.is_some()
+                && !composite_allows(parent, role.as_deref())
+            {
                 diagnostics.push(make_diagnostic(node));
             }
 
@@ -384,7 +451,7 @@ fn visit_jsx(
         _ => {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                visit_jsx(&child, source, diagnostics, inside_interactive);
+                visit_jsx(&child, source, diagnostics, parent_role);
             }
         }
     }
@@ -499,5 +566,47 @@ mod tests {
     fn test_tsx_button_alone_passes() {
         let diags = check_tsx(r#"const App = () => <button>text</button>;"#);
         assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_listbox_with_option_passes() {
+        let diags =
+            check_html(r#"<div role="listbox"><div role="option">a</div></div>"#);
+        assert_eq!(diags.len(), 0, "option is a valid child of listbox, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_tsx_listbox_with_mapped_options_passes() {
+        let diags = check_tsx(
+            r#"const App = () => <div role="listbox">{items.map((p, i) => (<div role="option" key={i} onClick={f}>{p.label}</div>))}</div>;"#,
+        );
+        assert_eq!(diags.len(), 0, "mapped options are valid listbox children, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_tablist_with_tab_passes() {
+        let diags = check_html(r#"<div role="tablist"><div role="tab">Tab</div></div>"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_menu_with_menuitem_passes() {
+        let diags = check_html(r#"<div role="menu"><div role="menuitem">Item</div></div>"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_listbox_with_button_still_fails() {
+        // A button is not a valid composite child of listbox.
+        let diags = check_html(r#"<div role="listbox"><button>x</button></div>"#);
+        assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn test_listbox_with_nested_tab_still_fails() {
+        // role="tab" is interactive but not an expected child of listbox.
+        let diags =
+            check_html(r#"<div role="listbox"><div role="tab">x</div></div>"#);
+        assert_eq!(diags.len(), 1);
     }
 }
