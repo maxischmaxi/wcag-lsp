@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -33,13 +34,7 @@ impl Rule for ImgAlt {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        // Look for a start_tag child
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+        check_html_element(node, source, diagnostics);
     }
 
     // Recurse into children
@@ -49,39 +44,21 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut is_img = false;
-    let mut has_alt = false;
+fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("img") {
-                is_img = true;
-            }
-        }
-        if child.kind() == "attribute" {
-            // The attribute node's first child is attribute_name
-            let mut attr_cursor = child.walk();
-            for attr_child in child.children(&mut attr_cursor) {
-                if attr_child.kind() == "attribute_name" {
-                    let attr_name = &source[attr_child.byte_range()];
-                    if attr_name.eq_ignore_ascii_case("alt") {
-                        has_alt = true;
-                    }
-                }
-            }
-        }
+    let is_img = html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("img"));
+    if !is_img {
+        return;
     }
 
-    if is_img && !has_alt {
-        diagnostics.push(make_diagnostic(element_node));
+    // A bound `:alt`/`v-bind:alt` still counts as providing an alt attribute.
+    let has_alt = html_attrs::attrs(&tag, source).iter().any(|a| a.name_eq("alt"));
+    if !has_alt {
+        diagnostics.push(make_diagnostic(element));
     }
 }
 
@@ -163,6 +140,37 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = ImgAlt;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = ImgAlt;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_alt_passes() {
+        let diags = check_vue(r#"<template><img :alt="alt" src="x"></template>"#);
+        assert_eq!(diags.len(), 0, "bound :alt should count as alt, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_vbind_alt_passes() {
+        let diags = check_vue(r#"<template><img v-bind:alt="a" src="x"></template>"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_vue_self_closing_without_alt_fails() {
+        let diags = check_vue(r#"<template><img src="x" /></template>"#);
+        assert_eq!(diags.len(), 1, "self-closing img without alt must be flagged");
+    }
+
+    #[test]
+    fn test_vue_missing_alt_fails() {
+        let diags = check_vue(r#"<template><img src="x"></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

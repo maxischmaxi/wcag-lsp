@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -53,11 +54,8 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            check_html_tag(&child, source, diagnostics, element);
-        }
+    if let Some(tag) = html_attrs::element_tag(element) {
+        check_html_tag(&tag, source, diagnostics, element);
     }
 }
 
@@ -72,25 +70,20 @@ fn check_html_tag(
     let mut has_focus = false;
     let mut has_blur = false;
 
-    let mut cursor = tag.walk();
-    for child in tag.children(&mut cursor) {
-        if child.kind() == "attribute" {
-            let attr_name = extract_html_attr_name(&child, source);
-            if let Some(name) = attr_name {
-                let lower = name.to_ascii_lowercase();
-                if lower == "onmouseover" {
-                    has_mouseover = true;
-                }
-                if lower == "onmouseout" {
-                    has_mouseout = true;
-                }
-                if lower == "onfocus" {
-                    has_focus = true;
-                }
-                if lower == "onblur" {
-                    has_blur = true;
-                }
-            }
+    for attr in html_attrs::attrs(tag, source) {
+        let lower = attr.name_lower();
+        // DOM (`onmouseover`) and Vue (`@mouseover` / `v-on:mouseover`) handlers.
+        if lower == "onmouseover" || (attr.event && lower == "mouseover") {
+            has_mouseover = true;
+        }
+        if lower == "onmouseout" || (attr.event && lower == "mouseout") {
+            has_mouseout = true;
+        }
+        if lower == "onfocus" || (attr.event && lower == "focus") {
+            has_focus = true;
+        }
+        if lower == "onblur" || (attr.event && lower == "blur") {
+            has_blur = true;
         }
     }
 
@@ -100,16 +93,6 @@ fn check_html_tag(
     if has_mouseout && !has_blur {
         diagnostics.push(make_diagnostic(element_node, "onMouseOut", "onBlur"));
     }
-}
-
-fn extract_html_attr_name(attr_node: &Node, source: &str) -> Option<String> {
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            return Some(source[child.byte_range()].to_string());
-        }
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +258,34 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = MouseEvents;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = MouseEvents;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_mouseover_with_focus_passes() {
+        // `@mouseover` is paired with `@focus` (and `v-on:` form too) — no diag.
+        let diags = check_vue(
+            r#"<template><div @mouseover="f" v-on:focus="g">x</div></template>"#,
+        );
+        assert_eq!(diags.len(), 0, "@mouseover paired with @focus should pass, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_mouseout_without_blur_fails() {
+        let diags = check_vue(r#"<template><div @mouseout="f">x</div></template>"#);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String(
+                "mouse-events-have-key-events".to_string()
+            ))
+        );
     }
 
     #[test]

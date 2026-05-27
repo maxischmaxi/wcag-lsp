@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -66,64 +67,27 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" {
-            check_html_start_tag(&child, source, diagnostics, element);
-        }
-    }
-}
+    let attrs = html_attrs::element_attrs(element, source);
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut role_value: Option<String> = None;
-    let mut present_attrs: Vec<String> = Vec::new();
+    let role = match attrs.iter().find(|a| a.name_eq("role")) {
+        Some(r) => r,
+        None => return,
+    };
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "attribute" {
-            let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(ref name) = attr_name {
-                present_attrs.push(name.to_lowercase());
-                if name.eq_ignore_ascii_case("role")
-                    && let Some(val) = attr_value
-                {
-                    role_value = Some(val);
-                }
-            }
-        }
+    // A bound role (`:role="x"`) is a runtime expression — can't validate it.
+    if role.bound {
+        return;
     }
 
-    if let Some(role) = role_value {
-        check_required_attrs(&role, &present_attrs, element_node, diagnostics);
-    }
-}
+    let role_value = match &role.value {
+        Some(val) => val.clone(),
+        None => return,
+    };
 
-/// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
+    // A bound `:aria-x` still counts as the attribute being present.
+    let present_attrs: Vec<String> = attrs.iter().map(|a| a.name_lower()).collect();
 
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-        }
-    }
-
-    (name, value)
+    check_required_attrs(&role_value, &present_attrs, element, diagnostics);
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +247,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = AriaRequiredAttr;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = AriaRequiredAttr;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_aria_checked_passes() {
+        let diags =
+            check_vue(r#"<template><div role="checkbox" :aria-checked="checked"></div></template>"#);
+        assert_eq!(diags.len(), 0, "bound :aria-checked should count as present, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_missing_aria_checked_fails() {
+        let diags = check_vue(r#"<template><div role="checkbox"></div></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

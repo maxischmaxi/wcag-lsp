@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -37,12 +38,7 @@ impl Rule for AreaAlt {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+        check_html_element(node, source, diagnostics);
     }
 
     // Recurse into children
@@ -52,48 +48,27 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut is_area = false;
-    let mut has_label = false;
+fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("area") {
-                is_area = true;
-            }
-        }
-        if child.kind() == "attribute" {
-            let attr_name = extract_html_attr_name(&child, source);
-            if let Some(name) = attr_name
-                && (name.eq_ignore_ascii_case("alt")
-                    || name.eq_ignore_ascii_case("aria-label")
-                    || name.eq_ignore_ascii_case("aria-labelledby"))
-            {
-                has_label = true;
-            }
-        }
+    let is_area =
+        html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("area"));
+    if !is_area {
+        return;
     }
 
-    if is_area && !has_label {
-        diagnostics.push(make_diagnostic(element_node));
-    }
-}
+    // A bound `:alt`/`v-bind:alt` (or aria-label/labelledby) still counts as
+    // providing an accessible name.
+    let has_label = html_attrs::attrs(&tag, source).iter().any(|a| {
+        a.name_eq("alt") || a.name_eq("aria-label") || a.name_eq("aria-labelledby")
+    });
 
-fn extract_html_attr_name(attr_node: &Node, source: &str) -> Option<String> {
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            return Some(source[child.byte_range()].to_string());
-        }
+    if !has_label {
+        diagnostics.push(make_diagnostic(element));
     }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +167,25 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = AreaAlt;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = AreaAlt;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_alt_passes() {
+        let diags = check_vue(r#"<template><area href="/link" :alt="label" /></template>"#);
+        assert_eq!(diags.len(), 0, "bound :alt should count as a label, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_missing_label_fails() {
+        let diags = check_vue(r#"<template><area href="/link" /></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

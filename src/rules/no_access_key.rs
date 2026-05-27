@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -47,14 +48,12 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_attribute(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("accesskey") {
-                diagnostics.push(make_diagnostic(node));
-            }
-        }
+    // A bound `:accesskey`/`v-bind:accesskey` is still using accesskey, so the
+    // normalized name is what matters here (presence/usage check).
+    if let Some(attr) = html_attrs::attr_from_node(node, source)
+        && attr.name_eq("accesskey")
+    {
+        diagnostics.push(make_diagnostic(node));
     }
 }
 
@@ -124,6 +123,27 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = NoAccessKey;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = NoAccessKey;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_unrelated_attr_passes() {
+        // A bound `:class` is not accesskey and must not be flagged.
+        let diags = check_vue(r#"<template><button :class="cls">Save</button></template>"#);
+        assert_eq!(diags.len(), 0, "unrelated bound attr should not be flagged, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_bound_accesskey_still_fails() {
+        // Even a bound `:accesskey` is still using accesskey.
+        let diags = check_vue(r#"<template><button :accesskey="k">Save</button></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -51,15 +52,11 @@ impl Rule for NoDuplicateId {
 // ---------------------------------------------------------------------------
 
 fn collect_ids_html<'a>(node: &Node<'a>, source: &str, entries: &mut Vec<(String, Node<'a>)>) {
-    if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag"
-                && let Some(id_value) = extract_html_id(&child, source)
-            {
-                entries.push((id_value, *node));
-            }
-        }
+    if node.kind() == "element"
+        && let Some(tag) = html_attrs::element_tag(node)
+        && let Some(id_value) = extract_html_id(&tag, source)
+    {
+        entries.push((id_value, *node));
     }
 
     let mut cursor = node.walk();
@@ -68,50 +65,19 @@ fn collect_ids_html<'a>(node: &Node<'a>, source: &str, entries: &mut Vec<(String
     }
 }
 
-/// Extract the value of an `id` attribute from an HTML start_tag, if present.
-fn extract_html_id(start_tag: &Node, source: &str) -> Option<String> {
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "attribute" {
-            let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(name) = attr_name
-                && name.eq_ignore_ascii_case("id")
-                && let Some(val) = attr_value
-                && !val.trim().is_empty()
-            {
-                return Some(val);
-            }
+/// The value of a static `id` attribute on a tag, if present and non-empty.
+///
+/// A bound `:id="expr"` is a runtime value that can't be compared literally, so
+/// it is excluded — only static `id="…"` values participate in duplicate
+/// detection.
+fn extract_html_id(tag: &Node, source: &str) -> Option<String> {
+    html_attrs::attrs(tag, source).into_iter().find_map(|attr| {
+        if attr.name_eq("id") && !attr.bound {
+            attr.value.filter(|v| !v.trim().is_empty())
+        } else {
+            None
         }
-    }
-    None
-}
-
-/// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-            // If we found a quoted_attribute_value but no inner attribute_value,
-            // it's an empty string like id=""
-            if value.is_none() {
-                value = Some(String::new());
-            }
-        }
-    }
-
-    (name, value)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +183,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = NoDuplicateId;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = NoDuplicateId;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_id_excluded() {
+        // `:id="x"` is a runtime value; duplicate static comparison must not fire.
+        let diags = check_vue(r#"<template><div :id="x"></div><div :id="x"></div></template>"#);
+        assert_eq!(diags.len(), 0, "bound :id must be excluded, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_duplicate_ids_fails() {
+        let diags = check_vue(r#"<template><div id="a"></div><div id="a"></div></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

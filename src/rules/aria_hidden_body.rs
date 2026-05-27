@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -36,13 +37,10 @@ impl Rule for AriaHiddenBody {
 // ---------------------------------------------------------------------------
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+    if node.kind() == "element"
+        && let Some(tag) = html_attrs::element_tag(node)
+    {
+        check_html_tag(&tag, source, diagnostics, node);
     }
 
     let mut cursor = node.walk();
@@ -51,55 +49,27 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
+fn check_html_tag(
+    tag: &Node,
     source: &str,
     diagnostics: &mut Vec<Diagnostic>,
     element_node: &Node,
 ) {
-    let mut is_body = false;
-    let mut has_aria_hidden_true = false;
-
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("body") {
-                is_body = true;
-            }
-        }
-        if child.kind() == "attribute" {
-            let mut attr_cursor = child.walk();
-            let mut is_aria_hidden = false;
-            let mut value_is_true = false;
-
-            for attr_child in child.children(&mut attr_cursor) {
-                if attr_child.kind() == "attribute_name" {
-                    let attr_name = &source[attr_child.byte_range()];
-                    if attr_name.eq_ignore_ascii_case("aria-hidden") {
-                        is_aria_hidden = true;
-                    }
-                }
-                if attr_child.kind() == "quoted_attribute_value" {
-                    let mut val_cursor = attr_child.walk();
-                    for val_child in attr_child.children(&mut val_cursor) {
-                        if val_child.kind() == "attribute_value" {
-                            let val = &source[val_child.byte_range()];
-                            if val.eq_ignore_ascii_case("true") {
-                                value_is_true = true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if is_aria_hidden && value_is_true {
-                has_aria_hidden_true = true;
-            }
-        }
+    let is_body = html_attrs::tag_name(tag, source).is_some_and(|n| n.eq_ignore_ascii_case("body"));
+    if !is_body {
+        return;
     }
 
-    if is_body && has_aria_hidden_true {
+    // A bound `:aria-hidden`/`v-bind:aria-hidden` is a runtime expression whose
+    // value we cannot evaluate literally — skip it. Only a static
+    // `aria-hidden="true"` should be flagged.
+    let has_aria_hidden_true = html_attrs::attrs(tag, source).iter().any(|a| {
+        a.name_eq("aria-hidden")
+            && !a.bound
+            && a.value.as_deref().is_some_and(|v| v.eq_ignore_ascii_case("true"))
+    });
+
+    if has_aria_hidden_true {
         diagnostics.push(make_diagnostic(element_node));
     }
 }
@@ -223,6 +193,30 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = AriaHiddenBody;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = AriaHiddenBody;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_aria_hidden_body_not_flagged() {
+        // `:aria-hidden` is a dynamic expression — value unknown, must not flag.
+        let diags = check_vue(r#"<template><body :aria-hidden="hidden"></body></template>"#);
+        assert_eq!(diags.len(), 0, "bound :aria-hidden must not flag, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_aria_hidden_true_body_fails() {
+        let diags = check_vue(r#"<template><body aria-hidden="true"></body></template>"#);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("aria-hidden-body".to_string()))
+        );
     }
 
     #[test]

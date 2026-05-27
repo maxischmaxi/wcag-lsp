@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -34,12 +35,7 @@ impl Rule for MetaRefresh {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+        check_html_element(node, source, diagnostics);
     }
 
     // Recurse into children
@@ -49,46 +45,39 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut is_meta = false;
+fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
+
+    if !html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("meta")) {
+        return;
+    }
+
     let mut is_refresh = false;
     let mut content_value: Option<String> = None;
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("meta") {
-                is_meta = true;
-            }
+    for attr in html_attrs::attrs(&tag, source) {
+        // Bound `:http-equiv`/`:content` are runtime expressions — can't evaluate.
+        if attr.bound {
+            continue;
         }
-        if child.kind() == "attribute" {
-            let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(name) = attr_name {
-                if name.eq_ignore_ascii_case("http-equiv")
-                    && let Some(ref val) = attr_value
-                    && val.eq_ignore_ascii_case("refresh")
-                {
-                    is_refresh = true;
-                }
-                if name.eq_ignore_ascii_case("content") {
-                    content_value = attr_value;
-                }
-            }
+        if attr.name_eq("http-equiv")
+            && attr.value.as_deref().is_some_and(|v| v.eq_ignore_ascii_case("refresh"))
+        {
+            is_refresh = true;
+        }
+        if attr.name_eq("content") {
+            content_value = attr.value;
         }
     }
 
-    if is_meta
-        && is_refresh
+    if is_refresh
         && let Some(ref content) = content_value
         && has_nonzero_delay(content)
     {
-        diagnostics.push(make_diagnostic(element_node));
+        diagnostics.push(make_diagnostic(element));
     }
 }
 
@@ -110,34 +99,6 @@ fn has_nonzero_delay(content: &str) -> bool {
     } else {
         false
     }
-}
-
-/// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-            // If we found a quoted_attribute_value but no inner attribute_value,
-            // it's an empty string like content=""
-            if value.is_none() {
-                value = Some(String::new());
-            }
-        }
-    }
-
-    (name, value)
 }
 
 fn make_diagnostic(node: &Node) -> Diagnostic {

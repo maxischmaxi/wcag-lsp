@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -58,23 +59,13 @@ fn check_html_start_tag(
     diagnostics: &mut Vec<Diagnostic>,
     element_node: &Node,
 ) {
-    let mut tag_name: Option<String> = None;
-    let mut has_scope = false;
+    let tag_name = html_attrs::tag_name(start_tag, source).map(|n| n.to_ascii_lowercase());
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            tag_name = Some(source[child.byte_range()].to_ascii_lowercase());
-        }
-        if child.kind() == "attribute" {
-            let attr_name = extract_html_attr_name(&child, source);
-            if let Some(name) = attr_name
-                && name.eq_ignore_ascii_case("scope")
-            {
-                has_scope = true;
-            }
-        }
-    }
+    // A bound `:scope`/`v-bind:scope` is a runtime value, but the *attribute*
+    // is still present on the element, so it stays subject to the th-only rule.
+    let has_scope = html_attrs::attrs(start_tag, source)
+        .iter()
+        .any(|a| a.name_eq("scope"));
 
     if has_scope
         && let Some(ref name) = tag_name
@@ -82,16 +73,6 @@ fn check_html_start_tag(
     {
         diagnostics.push(make_diagnostic(element_node));
     }
-}
-
-fn extract_html_attr_name(attr_node: &Node, source: &str) -> Option<String> {
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            return Some(source[child.byte_range()].to_string());
-        }
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +205,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = ScopeAttr;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = ScopeAttr;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_scope_on_th_passes() {
+        // `:scope` on a <th> is correct placement; a dynamic value must not flag.
+        let diags = check_vue(r#"<template><th :scope="col">N</th></template>"#);
+        assert_eq!(diags.len(), 0, "bound :scope on th should pass, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_scope_on_td_still_fails() {
+        let diags = check_vue(r#"<template><td scope="col">N</td></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

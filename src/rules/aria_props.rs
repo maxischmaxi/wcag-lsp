@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -108,15 +109,28 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_attribute(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            let name = source[child.byte_range()].to_lowercase();
-            if name.starts_with("aria-") && !VALID_ARIA_ATTRS.contains(name.as_str()) {
-                diagnostics.push(make_diagnostic(&child, &name));
-            }
-        }
+    let attr = match html_attrs::attr_from_node(node, source) {
+        Some(a) => a,
+        None => return,
+    };
+
+    // Name validation applies even to bound attributes: `:aria-xyz` has an
+    // invalid name regardless of its (dynamic) value. Use the normalized name
+    // so `:aria-label` / `v-bind:aria-label` resolve to a valid `aria-label`.
+    let name = attr.name_lower();
+    if name.starts_with("aria-") && !VALID_ARIA_ATTRS.contains(name.as_str()) {
+        // Report against the attribute_name node when available for a tight range.
+        let name_node = attribute_name_node(node).unwrap_or(*node);
+        diagnostics.push(make_diagnostic(&name_node, &name));
     }
+}
+
+/// The `attribute_name` node inside an `attribute`, for precise diagnostics.
+fn attribute_name_node<'a>(attr_node: &Node<'a>) -> Option<Node<'a>> {
+    let mut cursor = attr_node.walk();
+    attr_node
+        .children(&mut cursor)
+        .find(|c| c.kind() == "attribute_name")
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +199,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = AriaProps;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = AriaProps;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_valid_aria_name_passes() {
+        // `:aria-label` normalizes to `aria-label`, a valid ARIA attribute.
+        let diags = check_vue(r#"<template><div :aria-label="label"></div></template>"#);
+        assert_eq!(diags.len(), 0, "bound :aria-label is a valid name, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_invalid_aria_name_still_fails() {
+        let diags = check_vue(r#"<template><div aria-foo="bar"></div></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

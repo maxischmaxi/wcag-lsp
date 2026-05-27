@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -32,12 +33,7 @@ impl Rule for HtmlLang {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+        check_html_element(node, source, diagnostics);
     }
 
     // Recurse into children
@@ -47,65 +43,26 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut is_html = false;
-    let mut has_lang = false;
-    let mut lang_is_empty = false;
+fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("html") {
-                is_html = true;
-            }
-        }
-        if child.kind() == "attribute" {
-            let mut attr_cursor = child.walk();
-            let mut is_lang_attr = false;
-            let mut has_value = false;
-            let mut value_is_empty = true;
-
-            for attr_child in child.children(&mut attr_cursor) {
-                if attr_child.kind() == "attribute_name" {
-                    let attr_name = &source[attr_child.byte_range()];
-                    if attr_name.eq_ignore_ascii_case("lang") {
-                        is_lang_attr = true;
-                    }
-                }
-                if attr_child.kind() == "quoted_attribute_value" {
-                    has_value = true;
-                    // Check if there's an attribute_value child inside the quoted value
-                    let mut val_cursor = attr_child.walk();
-                    for val_child in attr_child.children(&mut val_cursor) {
-                        if val_child.kind() == "attribute_value" {
-                            let val = &source[val_child.byte_range()];
-                            if !val.trim().is_empty() {
-                                value_is_empty = false;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if is_lang_attr {
-                has_lang = true;
-                // lang="" (has_value true but value_is_empty true) means empty lang
-                // lang (no value at all) also counts as empty
-                if !has_value || value_is_empty {
-                    lang_is_empty = true;
-                }
-            }
-        }
+    if !html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("html")) {
+        return;
     }
 
-    if is_html && (!has_lang || lang_is_empty) {
-        diagnostics.push(make_diagnostic(element_node));
+    // A bound `:lang`/`v-bind:lang` provides a (dynamic) language → treat as set.
+    // A static `lang` must have a non-empty value.
+    let lang_ok = match html_attrs::attrs(&tag, source).into_iter().find(|a| a.name_eq("lang")) {
+        Some(a) if a.bound => true,
+        Some(a) => a.value.as_deref().is_some_and(|v| !v.trim().is_empty()),
+        None => false,
+    };
+
+    if !lang_ok {
+        diagnostics.push(make_diagnostic(element));
     }
 }
 
@@ -165,5 +122,24 @@ mod tests {
     fn test_no_html_element() {
         let diags = check_html("<div>Hello</div>");
         assert_eq!(diags.len(), 0);
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = HtmlLang;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_lang_passes() {
+        let diags = check_vue(r#"<html :lang="locale"><body></body></html>"#);
+        assert_eq!(diags.len(), 0, "bound :lang counts as set, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_missing_lang_fails() {
+        let diags = check_vue("<html><body></body></html>");
+        assert_eq!(diags.len(), 1);
     }
 }

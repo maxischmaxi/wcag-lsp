@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -67,30 +68,44 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_attribute(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut is_lang = false;
-    let mut value: Option<(String, Node)> = None;
+    let attr = match html_attrs::attr_from_node(node, source) {
+        Some(a) => a,
+        None => return,
+    };
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("lang") {
-                is_lang = true;
-            }
-        }
+    if !attr.name_eq("lang") {
+        return;
+    }
+
+    // A bound `:lang="x"` is a runtime expression — can't validate it.
+    if attr.bound {
+        return;
+    }
+
+    if let Some(val) = attr.value {
+        // Report against the value node when available, else the attribute node.
+        let val_node = value_node(node).unwrap_or(*node);
+        check_lang_value(&val, &val_node, diagnostics);
+    }
+}
+
+/// The `attribute_value` node inside an `attribute`, for precise diagnostics.
+fn value_node<'a>(attr_node: &Node<'a>) -> Option<Node<'a>> {
+    let mut cursor = attr_node.walk();
+    for child in attr_node.children(&mut cursor) {
         if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some((source[val_child.byte_range()].to_string(), val_child));
+            let mut vc = child.walk();
+            for v in child.children(&mut vc) {
+                if v.kind() == "attribute_value" {
+                    return Some(v);
                 }
             }
         }
+        if child.kind() == "attribute_value" {
+            return Some(child);
+        }
     }
-
-    if is_lang && let Some((val, val_node)) = value {
-        check_lang_value(&val, &val_node, diagnostics);
-    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +155,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = LangValid;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = LangValid;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_lang_skipped() {
+        // Dynamic value: cannot validate the expression literally.
+        let diags = check_vue(r#"<template><div :lang="locale"></div></template>"#);
+        assert_eq!(diags.len(), 0, "bound :lang should be skipped, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_invalid_lang_still_fails() {
+        let diags = check_vue(r#"<template><div lang="xyz"></div></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

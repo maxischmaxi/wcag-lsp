@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -45,24 +46,9 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut is_table = false;
-
-    // Check the start_tag for the tag name
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "tag_name" {
-                    let name = &source[tag_child.byte_range()];
-                    if name.eq_ignore_ascii_case("table") {
-                        is_table = true;
-                    }
-                }
-            }
-        }
-    }
-
+    // `element_tag_name` resolves both `start_tag` and `self_closing_tag`.
+    let is_table = html_attrs::element_tag_name(element, source)
+        .is_some_and(|n| n.eq_ignore_ascii_case("table"));
     if !is_table {
         return;
     }
@@ -80,20 +66,10 @@ fn has_th_descendant(node: &Node, source: &str) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "element" {
-            // Check if this child element has a start_tag with tag_name "th"
-            let mut inner_cursor = child.walk();
-            for inner_child in child.children(&mut inner_cursor) {
-                if inner_child.kind() == "start_tag" {
-                    let mut tag_cursor = inner_child.walk();
-                    for tag_child in inner_child.children(&mut tag_cursor) {
-                        if tag_child.kind() == "tag_name" {
-                            let name = &source[tag_child.byte_range()];
-                            if name.eq_ignore_ascii_case("th") {
-                                return true;
-                            }
-                        }
-                    }
-                }
+            let is_th = html_attrs::element_tag_name(&child, source)
+                .is_some_and(|n| n.eq_ignore_ascii_case("th"));
+            if is_th {
+                return true;
             }
             // Recurse into nested elements
             if has_th_descendant(&child, source) {
@@ -132,6 +108,31 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = TableHeader;
         rule.check(&tree.root_node(), source, FileType::Html)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = TableHeader;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_table_with_th_passes() {
+        let diags = check_vue(
+            r#"<template><table><tr><th>Header</th></tr><tr><td>Data</td></tr></table></template>"#,
+        );
+        assert_eq!(diags.len(), 0, "table with <th> should pass in Vue, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_table_without_th_fails() {
+        let diags = check_vue(r#"<template><table><tr><td>Data</td></tr></table></template>"#);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("table-header".to_string()))
+        );
     }
 
     #[test]

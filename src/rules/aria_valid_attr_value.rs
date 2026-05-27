@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -174,14 +175,18 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_attribute(attr_node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let (name, value) = extract_html_attribute(attr_node, source);
-
-    let attr_name = match name {
-        Some(n) => n,
+    let attr = match html_attrs::attr_from_node(attr_node, source) {
+        Some(a) => a,
         None => return,
     };
 
-    let lower_name = attr_name.to_lowercase();
+    // A bound value (`:aria-checked="x"`, `v-bind:aria-checked`) is a runtime
+    // expression we cannot validate literally — skip it.
+    if attr.bound {
+        return;
+    }
+
+    let lower_name = attr.name_lower();
     if !lower_name.starts_with("aria-") {
         return;
     }
@@ -191,7 +196,7 @@ fn check_html_attribute(attr_node: &Node, source: &str, diagnostics: &mut Vec<Di
         None => return, // Unknown aria attribute or free-form (like aria-label)
     };
 
-    let attr_value = match value {
+    let attr_value = match attr.value {
         Some(v) => v,
         None => return, // No value specified
     };
@@ -204,28 +209,6 @@ fn check_html_attribute(attr_node: &Node, source: &str, diagnostics: &mut Vec<Di
             attr_type,
         ));
     }
-}
-
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-        }
-    }
-
-    (name, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +340,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = AriaValidAttrValue;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = AriaValidAttrValue;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_aria_value_skipped() {
+        // Dynamic expression: cannot be validated literally, must not be flagged.
+        let diags = check_vue(r#"<template><div :aria-checked="state"></div></template>"#);
+        assert_eq!(diags.len(), 0, "bound aria value should be skipped, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_invalid_aria_value_still_fails() {
+        let diags = check_vue(r#"<template><div aria-checked="yes"></div></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

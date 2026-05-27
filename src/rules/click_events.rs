@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -104,40 +105,14 @@ fn visit_html(
     }
 }
 
-/// The lowercased `role` attribute value of an HTML element, if present.
+/// The lowercased static `role` attribute value of an HTML element, if present.
+/// A bound role (`:role`) is dynamic and treated as absent.
 fn html_element_role(element: &Node, source: &str) -> Option<String> {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "attribute" {
-                    let mut found = false;
-                    let mut attr_cursor = tag_child.walk();
-                    for attr_child in tag_child.children(&mut attr_cursor) {
-                        if attr_child.kind() == "attribute_name"
-                            && source[attr_child.byte_range()].eq_ignore_ascii_case("role")
-                        {
-                            found = true;
-                        }
-                        if found && attr_child.kind() == "quoted_attribute_value" {
-                            let mut val_cursor = attr_child.walk();
-                            for val_child in attr_child.children(&mut val_cursor) {
-                                if val_child.kind() == "attribute_value" {
-                                    return Some(
-                                        source[val_child.byte_range()]
-                                            .trim()
-                                            .to_ascii_lowercase(),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
+    html_attrs::element_attrs(element, source)
+        .into_iter()
+        .find(|a| a.name_eq("role") && !a.bound)
+        .and_then(|a| a.value)
+        .map(|v| v.trim().to_ascii_lowercase())
 }
 
 fn check_html_element(
@@ -161,30 +136,26 @@ fn check_html_tag(
     element_node: &Node,
     composite: Option<&[&str]>,
 ) {
-    let mut tag_name: Option<String> = None;
+    let tag_name = html_attrs::tag_name(tag, source).map(|s| s.to_ascii_lowercase());
     let mut role: Option<String> = None;
     let mut has_onclick = false;
     let mut has_key_event = false;
 
-    let mut cursor = tag.walk();
-    for child in tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            tag_name = Some(source[child.byte_range()].to_ascii_lowercase());
+    for attr in html_attrs::attrs(tag, source) {
+        let lower = attr.name_lower();
+        // DOM (`onclick`) and Vue (`@click` / `v-on:click`) click handlers.
+        if lower == "onclick" || (attr.event && lower == "click") {
+            has_onclick = true;
         }
-        if child.kind() == "attribute" {
-            let attr_name = extract_html_attr_name(&child, source);
-            if let Some(name) = attr_name {
-                let lower = name.to_ascii_lowercase();
-                if lower == "onclick" {
-                    has_onclick = true;
-                }
-                if lower == "onkeydown" || lower == "onkeyup" {
-                    has_key_event = true;
-                }
-                if lower == "role" {
-                    role = extract_html_attr_value(&child, source).map(|v| v.trim().to_ascii_lowercase());
-                }
-            }
+        // DOM (`onkeydown`/`onkeyup`) and Vue (`@keydown`/`@keyup`) key handlers.
+        if lower == "onkeydown"
+            || lower == "onkeyup"
+            || (attr.event && (lower == "keydown" || lower == "keyup"))
+        {
+            has_key_event = true;
+        }
+        if lower == "role" && !attr.bound {
+            role = attr.value.map(|v| v.trim().to_ascii_lowercase());
         }
     }
 
@@ -203,31 +174,6 @@ fn check_html_tag(
     if has_onclick && !has_key_event {
         diagnostics.push(make_diagnostic(element_node));
     }
-}
-
-fn extract_html_attr_name(attr_node: &Node, source: &str) -> Option<String> {
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            return Some(source[child.byte_range()].to_string());
-        }
-    }
-    None
-}
-
-fn extract_html_attr_value(attr_node: &Node, source: &str) -> Option<String> {
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    return Some(source[val_child.byte_range()].to_string());
-                }
-            }
-        }
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +399,40 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = ClickEvents;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = ClickEvents;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_click_without_key_fails() {
+        let diags = check_vue(r#"<template><div @click="f">x</div></template>"#);
+        assert_eq!(diags.len(), 1, "@click without key handler should fail");
+    }
+
+    #[test]
+    fn test_vue_click_with_keydown_passes() {
+        let diags = check_vue(r#"<template><div @click="f" @keydown="g">x</div></template>"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_vue_von_click_with_modifier_and_keyup_passes() {
+        let diags =
+            check_vue(r#"<template><div v-on:click.prevent="f" @keyup.enter="g">x</div></template>"#);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_vue_listbox_option_click_passes() {
+        let diags = check_vue(
+            r#"<template><div role="listbox"><div role="option" @click="f">x</div></div></template>"#,
+        );
+        assert_eq!(diags.len(), 0, "managed option exempt in Vue too, got: {diags:?}");
     }
 
     #[test]

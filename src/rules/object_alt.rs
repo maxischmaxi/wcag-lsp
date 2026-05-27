@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -47,38 +48,21 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut is_object = false;
-    let mut has_accessible_name = false;
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
 
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "tag_name" {
-                    let name = &source[tag_child.byte_range()];
-                    if name.eq_ignore_ascii_case("object") {
-                        is_object = true;
-                    }
-                }
-                if tag_child.kind() == "attribute" {
-                    let attr_name = extract_html_attr_name(&tag_child, source);
-                    if let Some(name) = attr_name
-                        && (name.eq_ignore_ascii_case("aria-label")
-                            || name.eq_ignore_ascii_case("aria-labelledby")
-                            || name.eq_ignore_ascii_case("title"))
-                    {
-                        has_accessible_name = true;
-                    }
-                }
-            }
-        }
-    }
-
+    let is_object =
+        html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("object"));
     if !is_object {
         return;
     }
 
+    // A bound `:title`/`:aria-label` still provides an accessible name.
+    let has_accessible_name = html_attrs::attrs(&tag, source).iter().any(|a| {
+        a.name_eq("aria-label") || a.name_eq("aria-labelledby") || a.name_eq("title")
+    });
     if has_accessible_name {
         return;
     }
@@ -109,16 +93,6 @@ fn has_content(element: &Node, source: &str) -> bool {
         }
     }
     false
-}
-
-fn extract_html_attr_name(attr_node: &Node, source: &str) -> Option<String> {
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            return Some(source[child.byte_range()].to_string());
-        }
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +259,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = ObjectAlt;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = ObjectAlt;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_aria_label_passes() {
+        let diags =
+            check_vue(r#"<template><object data="movie.swf" :aria-label="label"></object></template>"#);
+        assert_eq!(diags.len(), 0, "bound :aria-label should provide a name, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_missing_name_fails() {
+        let diags = check_vue(r#"<template><object data="movie.swf"></object></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

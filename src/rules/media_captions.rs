@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -45,23 +46,8 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut is_media = false;
-
-    // Check the start_tag for tag name
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "tag_name" {
-                    let name = &source[tag_child.byte_range()];
-                    if name.eq_ignore_ascii_case("video") || name.eq_ignore_ascii_case("audio") {
-                        is_media = true;
-                    }
-                }
-            }
-        }
-    }
+    let is_media = html_attrs::element_tag_name(element, source)
+        .is_some_and(|n| n.eq_ignore_ascii_case("video") || n.eq_ignore_ascii_case("audio"));
 
     if !is_media {
         return;
@@ -96,65 +82,25 @@ fn has_caption_track(node: &Node, source: &str) -> bool {
 
 /// Check if an element node is a <track kind="captions"> or <track kind="subtitles">
 fn is_caption_track_element(element: &Node, source: &str) -> bool {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" {
-            let mut is_track = false;
-            let mut has_caption_kind = false;
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return false,
+    };
 
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "tag_name" {
-                    let name = &source[tag_child.byte_range()];
-                    if name.eq_ignore_ascii_case("track") {
-                        is_track = true;
-                    }
-                }
-                if tag_child.kind() == "attribute" {
-                    let (attr_name, attr_value) = extract_html_attribute(&tag_child, source);
-                    if let Some(name) = attr_name
-                        && name.eq_ignore_ascii_case("kind")
-                        && let Some(ref val) = attr_value
-                        && (val.eq_ignore_ascii_case("captions")
-                            || val.eq_ignore_ascii_case("subtitles"))
-                    {
-                        has_caption_kind = true;
-                    }
-                }
-            }
-
-            if is_track && has_caption_kind {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-            if value.is_none() {
-                value = Some(String::new());
-            }
-        }
+    let is_track =
+        html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("track"));
+    if !is_track {
+        return false;
     }
 
-    (name, value)
+    html_attrs::attrs(&tag, source).iter().any(|attr| {
+        // A bound `:kind` is a runtime expression — skip the value check.
+        attr.name_eq("kind")
+            && !attr.bound
+            && attr.value.as_deref().is_some_and(|val| {
+                val.eq_ignore_ascii_case("captions") || val.eq_ignore_ascii_case("subtitles")
+            })
+    })
 }
 
 fn make_diagnostic(node: &Node) -> Diagnostic {
@@ -185,6 +131,27 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = MediaCaptions;
         rule.check(&tree.root_node(), source, FileType::Html)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = MediaCaptions;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_static_captions_track_passes() {
+        let diags = check_vue(
+            r#"<template><video src="movie.mp4"><track kind="captions" src="caps.vtt" /></video></template>"#,
+        );
+        assert_eq!(diags.len(), 0, "static captions track satisfies the rule, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_video_without_captions_fails() {
+        let diags = check_vue(r#"<template><video src="movie.mp4"></video></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

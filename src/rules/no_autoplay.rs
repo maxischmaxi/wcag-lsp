@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -37,12 +38,7 @@ impl Rule for NoAutoplay {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+        check_html_element(node, source, diagnostics);
     }
 
     // Recurse into children
@@ -52,50 +48,34 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut is_media = false;
+fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
+
+    let is_media = html_attrs::tag_name(&tag, source)
+        .is_some_and(|n| n.eq_ignore_ascii_case("audio") || n.eq_ignore_ascii_case("video"));
+    if !is_media {
+        return;
+    }
+
     let mut has_autoplay = false;
     let mut has_muted = false;
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("audio") || name.eq_ignore_ascii_case("video") {
-                is_media = true;
-            }
+    // Presence checks: a bound `:autoplay`/`:muted` still counts as present.
+    for attr in html_attrs::attrs(&tag, source) {
+        if attr.name_eq("autoplay") {
+            has_autoplay = true;
         }
-        if child.kind() == "attribute" {
-            let attr_name = extract_html_attr_name(&child, source);
-            if let Some(name) = attr_name {
-                if name.eq_ignore_ascii_case("autoplay") {
-                    has_autoplay = true;
-                }
-                if name.eq_ignore_ascii_case("muted") {
-                    has_muted = true;
-                }
-            }
+        if attr.name_eq("muted") {
+            has_muted = true;
         }
     }
 
-    if is_media && has_autoplay && !has_muted {
-        diagnostics.push(make_diagnostic(element_node));
+    if has_autoplay && !has_muted {
+        diagnostics.push(make_diagnostic(element));
     }
-}
-
-fn extract_html_attr_name(attr_node: &Node, source: &str) -> Option<String> {
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            return Some(source[child.byte_range()].to_string());
-        }
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +216,27 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = NoAutoplay;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = NoAutoplay;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_muted_passes() {
+        // Bound :muted counts as present, so autoplay+muted is fine.
+        let diags =
+            check_vue(r#"<template><video src="movie.mp4" autoplay :muted="isMuted"></video></template>"#);
+        assert_eq!(diags.len(), 0, "bound :muted should count as muted, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_autoplay_without_muted_fails() {
+        let diags = check_vue(r#"<template><video src="movie.mp4" autoplay></video></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

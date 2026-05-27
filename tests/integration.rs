@@ -94,6 +94,79 @@ fn test_tsx_analysis() {
 }
 
 #[test]
+fn test_vue_analysis() {
+    let mut mgr = DocumentManager::new();
+    // Mirrors the reported issue: bound `:alt` must NOT trigger img-alt, while a
+    // genuinely missing alt still does. Also exercises a Vue listbox/option
+    // composite widget with `@click` and a bound `:role`.
+    let vue = r#"<template>
+  <div>
+    <img :alt="alt" src="a.jpg" />
+    <img v-bind:alt="alt2" src="b.jpg">
+    <img src="noalt.jpg" />
+    <button :aria-label="label" @click="go" />
+    <ul role="listbox">
+      <li
+        v-for="(o, i) in items"
+        :key="o.id"
+        role="option"
+        :aria-selected="i === active"
+        tabindex="-1"
+        @click="select(o)"
+      >{{ o.label }}</li>
+    </ul>
+    <div :role="dynamicRole" aria-checked="maybe" />
+  </div>
+</template>"#;
+
+    let doc = mgr
+        .open("file:///Comp.vue".to_string(), vue.to_string(), 1)
+        .unwrap();
+    let rules = rules::all_rules();
+    let config = Config::default();
+    let diagnostics = engine::run_diagnostics(doc, &rules, &config);
+
+    let codes: Vec<String> = diagnostics
+        .iter()
+        .filter_map(|d| d.code.as_ref())
+        .map(|c| match c {
+            NumberOrString::String(s) => s.clone(),
+            NumberOrString::Number(n) => n.to_string(),
+        })
+        .collect();
+
+    // The genuine violations must be reported...
+    assert!(
+        codes.contains(&"img-alt".to_string()),
+        "Missing img-alt for the alt-less <img>, found: {codes:?}"
+    );
+    assert!(
+        codes.contains(&"aria-valid-attr-value".to_string()),
+        "Missing aria-valid-attr-value for static aria-checked=\"maybe\", found: {codes:?}"
+    );
+    // ...but exactly one img-alt (the two bound :alt images must NOT be flagged).
+    assert_eq!(
+        codes.iter().filter(|c| *c == "img-alt").count(),
+        1,
+        "bound :alt / v-bind:alt must not be flagged, found: {codes:?}"
+    );
+    // page-title is a document-level rule and must not fire on an SFC fragment.
+    assert!(
+        !codes.contains(&"page-title".to_string()),
+        "page-title must not fire on a Vue SFC fragment, found: {codes:?}"
+    );
+    // Composite-widget option must not trigger these in Vue.
+    assert!(
+        !codes.contains(&"aria-required-children".to_string()),
+        "listbox has option children, found: {codes:?}"
+    );
+    assert!(
+        !codes.contains(&"nested-interactive".to_string()),
+        "option in listbox is a valid composite widget, found: {codes:?}"
+    );
+}
+
+#[test]
 fn test_config_disables_rule() {
     let mut mgr = DocumentManager::new();
     let html = r#"<html><body><img src="photo.jpg"></body></html>"#;

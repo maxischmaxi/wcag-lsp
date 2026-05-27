@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -80,7 +81,15 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let role = match get_html_role(element, source) {
+    let attrs = html_attrs::element_attrs(element, source);
+    let role_attr = attrs.iter().find(|a| a.name_eq("role"));
+
+    // A bound role (`:role="x"`) is a runtime expression — can't validate it.
+    if role_attr.is_some_and(|a| a.bound) {
+        return;
+    }
+
+    let role = match role_attr.and_then(|a| a.value.clone()) {
         Some(r) => r,
         None => return,
     };
@@ -95,49 +104,21 @@ fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagno
     }
 }
 
-fn get_html_role(element: &Node, source: &str) -> Option<String> {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "attribute" {
-                    let (name, value) = extract_html_attribute(&tag_child, source);
-                    if let Some(ref n) = name
-                        && n.eq_ignore_ascii_case("role")
-                    {
-                        return value;
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-fn get_html_tag_name(element: &Node, source: &str) -> Option<String> {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "tag_name" {
-                    return Some(source[tag_child.byte_range()].to_lowercase());
-                }
-            }
-        }
-    }
-    None
-}
-
+/// The element's role for ancestor matching: an explicit static `role`, or the
+/// implicit role of its tag name. A bound `:role` is treated as unknown.
 fn get_ancestor_role_html(element: &Node, source: &str) -> Option<String> {
-    // Check explicit role first
-    if let Some(role) = get_html_role(element, source) {
-        return Some(role);
+    let attrs = html_attrs::element_attrs(element, source);
+    if let Some(role_attr) = attrs.iter().find(|a| a.name_eq("role")) {
+        // A bound role is unknown at lint time — don't fall back to the implicit
+        // tag role, since the explicit (dynamic) role overrides it.
+        if role_attr.bound {
+            return None;
+        }
+        return role_attr.value.clone();
     }
-    // Check implicit role from tag name
-    if let Some(tag) = get_html_tag_name(element, source)
-        && let Some(implicit) = IMPLICIT_PARENT_ROLES.get(tag.as_str())
+    // Check implicit role from tag name.
+    if let Some(tag) = html_attrs::element_tag_name(element, source)
+        && let Some(implicit) = IMPLICIT_PARENT_ROLES.get(tag.to_ascii_lowercase().as_str())
     {
         return Some(implicit.to_string());
     }
@@ -156,28 +137,6 @@ fn has_required_html_parent(node: &Node, source: &str, required_parents: &[&str]
         current = parent.parent();
     }
     false
-}
-
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-        }
-    }
-
-    (name, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +301,28 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = AriaRequiredParent;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = AriaRequiredParent;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_role_skips_check() {
+        // Bound role is unknown at lint time; can't require a parent for it.
+        let diags =
+            check_vue(r#"<template><div><div :role="r">item</div></div></template>"#);
+        assert_eq!(diags.len(), 0, "bound role can't be validated, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_listitem_without_list_parent_fails() {
+        let diags =
+            check_vue(r#"<template><div><div role="listitem">item</div></div></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

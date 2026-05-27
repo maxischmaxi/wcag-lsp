@@ -21,6 +21,7 @@ pub mod click_events;
 pub mod form_label;
 pub mod heading_content;
 pub mod heading_order;
+pub mod html_attrs;
 pub mod html_lang;
 pub mod iframe_title;
 pub mod img_alt;

@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -37,12 +38,7 @@ impl Rule for IframeTitle {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+        check_html_element(node, source, diagnostics);
     }
 
     let mut cursor = node.walk();
@@ -51,67 +47,34 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut is_iframe = false;
+fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
+
+    let is_iframe =
+        html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("iframe"));
+    if !is_iframe {
+        return;
+    }
+
     let mut has_nonempty_title = false;
-
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("iframe") {
-                is_iframe = true;
-            }
+    for attr in html_attrs::attrs(&tag, source) {
+        if !attr.name_eq("title") {
+            continue;
         }
-        if child.kind() == "attribute" {
-            let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(name) = attr_name
-                && name.eq_ignore_ascii_case("title")
-                && let Some(val) = attr_value
-                && !val.trim().is_empty()
-            {
-                has_nonempty_title = true;
-            }
-            // title attribute without a value (bare attribute) counts as empty
+        // A bound `:title`/`v-bind:title` is a runtime expression — assume it
+        // provides a title. A static title must have a non-empty value (a bare
+        // `title` attribute without a value counts as empty).
+        if attr.bound || attr.value.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+            has_nonempty_title = true;
         }
     }
 
-    if is_iframe && !has_nonempty_title {
-        diagnostics.push(make_diagnostic(element_node));
+    if !has_nonempty_title {
+        diagnostics.push(make_diagnostic(element));
     }
-}
-
-/// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-            // If we found a quoted_attribute_value but no inner attribute_value,
-            // it's an empty string like title=""
-            if value.is_none() {
-                value = Some(String::new());
-            }
-        }
-    }
-
-    (name, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +219,25 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = IframeTitle;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = IframeTitle;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_title_passes() {
+        let diags = check_vue(r#"<template><iframe src="/embed" :title="t"></iframe></template>"#);
+        assert_eq!(diags.len(), 0, "bound :title should be assumed present, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_missing_title_fails() {
+        let diags = check_vue(r#"<template><iframe src="/embed"></iframe></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

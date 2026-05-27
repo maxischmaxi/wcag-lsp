@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -83,54 +84,21 @@ fn check_html_tag(
     diagnostics: &mut Vec<Diagnostic>,
     element_node: &Node,
 ) {
-    let mut tag_name: Option<String> = None;
-    let mut role_value: Option<String> = None;
+    let tag_name = html_attrs::tag_name(tag, source).map(|n| n.to_ascii_lowercase());
 
-    let mut cursor = tag.walk();
-    for child in tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            tag_name = Some(source[child.byte_range()].to_ascii_lowercase());
-        }
-        if child.kind() == "attribute" {
-            let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(name) = attr_name
-                && name.eq_ignore_ascii_case("role")
-            {
-                role_value = attr_value;
-            }
-        }
-    }
+    // A bound `:role="x"` is a runtime value we can't compare to the implicit
+    // role, so skip it (treat as "no static role value").
+    let role_value = html_attrs::attrs(tag, source)
+        .into_iter()
+        .find(|a| a.name_eq("role"))
+        .filter(|a| !a.bound)
+        .map(|a| a.value.unwrap_or_default());
 
     if let Some(ref name) = tag_name
         && let Some(ref role) = role_value
     {
         check_redundant_role(name, role, element_node, diagnostics);
     }
-}
-
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-            if value.is_none() {
-                value = Some(String::new());
-            }
-        }
-    }
-
-    (name, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +248,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = NoRedundantRoles;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = NoRedundantRoles;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_role_skipped() {
+        // Dynamic role can't be compared to the implicit role — must not flag.
+        let diags = check_vue(r#"<template><button :role="r">Click</button></template>"#);
+        assert_eq!(diags.len(), 0, "bound :role should be skipped, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_redundant_role_still_fails() {
+        let diags = check_vue(r#"<template><button role="button">Click</button></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

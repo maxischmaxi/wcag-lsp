@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
@@ -39,6 +40,10 @@ struct LabelForValues {
     literals: HashSet<String>,
     /// Expression texts (identifiers / member expressions), e.g. from `htmlFor={inputId}`.
     expressions: HashSet<String>,
+    /// `true` when at least one `<label>` has a bound `:for`/`v-bind:for`. Its
+    /// runtime value can't be compared literally, so any input with a static id
+    /// is treated as possibly-labelled to avoid false positives. (HTML only.)
+    has_bound_for: bool,
 }
 
 impl LabelForValues {
@@ -46,6 +51,7 @@ impl LabelForValues {
         Self {
             literals: HashSet::new(),
             expressions: HashSet::new(),
+            has_bound_for: false,
         }
     }
 }
@@ -79,35 +85,17 @@ fn collect_html_label_for_values(root: &Node, source: &str) -> LabelForValues {
 }
 
 fn collect_html_labels(node: &Node, source: &str, values: &mut LabelForValues) {
-    if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" {
-                let mut is_label = false;
-                let mut for_value = None;
-
-                let mut tag_cursor = child.walk();
-                for tag_child in child.children(&mut tag_cursor) {
-                    if tag_child.kind() == "tag_name" {
-                        let name = &source[tag_child.byte_range()];
-                        if name.eq_ignore_ascii_case("label") {
-                            is_label = true;
-                        }
-                    }
-                    if tag_child.kind() == "attribute" {
-                        let (attr_name, attr_val) = extract_html_attribute(&tag_child, source);
-                        if let Some(ref name) = attr_name
-                            && name.eq_ignore_ascii_case("for")
-                        {
-                            for_value = attr_val;
-                        }
-                    }
-                }
-
-                if is_label && let Some(val) = for_value {
-                    values.literals.insert(val);
-                }
-            }
+    if node.kind() == "element"
+        && let Some(tag) = html_attrs::element_tag(node)
+        && html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("label"))
+        && let Some(for_attr) = html_attrs::find_attr(&tag, source, "for")
+    {
+        if for_attr.bound {
+            // A bound `:for="expr"` can't be matched literally; record that an
+            // unresolvable label-for exists so inputs aren't falsely flagged.
+            values.has_bound_for = true;
+        } else if let Some(val) = for_attr.value {
+            values.literals.insert(val);
         }
     }
 
@@ -137,72 +125,68 @@ fn check_html_element(
     diags: &mut Vec<Diagnostic>,
     label_fors: &LabelForValues,
 ) {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" {
-            check_html_start_tag(&child, source, diags, element, label_fors);
-        }
-    }
-}
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diags: &mut Vec<Diagnostic>,
-    element_node: &Node,
-    label_fors: &LabelForValues,
-) {
-    let mut is_form_element = false;
+    let is_form_element = html_attrs::tag_name(&tag, source)
+        .is_some_and(|name| FORM_TAGS.iter().any(|t| t.eq_ignore_ascii_case(name)));
+    if !is_form_element {
+        return;
+    }
+
+    let attrs = html_attrs::attrs(&tag, source);
+
     let mut is_hidden = false;
     let mut has_label = false;
-    let mut id_value: Option<String> = None;
+    let mut static_id: Option<String> = None;
+    let mut id_is_bound = false;
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if FORM_TAGS.iter().any(|t| t.eq_ignore_ascii_case(name)) {
-                is_form_element = true;
-            }
+    for attr in &attrs {
+        // A static or bound `aria-label`/`aria-labelledby`/`title` provides a
+        // label; a bound `:aria-label="x"` still counts as present.
+        if LABEL_ATTRS_HTML.iter().any(|a| attr.name_eq(a)) {
+            has_label = true;
         }
-        if child.kind() == "attribute" {
-            let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(ref name) = attr_name {
-                if LABEL_ATTRS_HTML
-                    .iter()
-                    .any(|a| a.eq_ignore_ascii_case(name))
-                {
-                    has_label = true;
-                }
-                if name.eq_ignore_ascii_case("type")
-                    && let Some(ref val) = attr_value
-                    && val.eq_ignore_ascii_case("hidden")
-                {
-                    is_hidden = true;
-                }
-                if name.eq_ignore_ascii_case("id") {
-                    id_value = attr_value;
-                }
+        if attr.name_eq("type")
+            && !attr.bound
+            && attr
+                .value
+                .as_deref()
+                .is_some_and(|v| v.eq_ignore_ascii_case("hidden"))
+        {
+            is_hidden = true;
+        }
+        if attr.name_eq("id") {
+            if attr.bound {
+                id_is_bound = true;
+            } else {
+                static_id = attr.value.clone();
             }
         }
     }
 
     // Check if the element is wrapped in a <label>
-    if is_form_element && !has_label && is_inside_label(element_node, source) {
+    if !has_label && is_inside_label(element, source) {
         has_label = true;
     }
 
-    // Check if there is a <label for="…"> matching this element's id
-    if is_form_element
-        && !has_label
-        && let Some(ref id) = id_value
-        && label_fors.literals.contains(id)
-    {
-        has_label = true;
+    // Check if there is a <label for="…"> matching this element's id. If either
+    // the input's `:id` or any label's `:for` is bound, the literal values can't
+    // be compared — be conservative and treat the input as possibly-labelled.
+    if !has_label {
+        if id_is_bound || label_fors.has_bound_for {
+            has_label = true;
+        } else if let Some(ref id) = static_id
+            && label_fors.literals.contains(id)
+        {
+            has_label = true;
+        }
     }
 
-    if is_form_element && !is_hidden && !has_label {
-        diags.push(make_diagnostic(element_node));
+    if !is_hidden && !has_label {
+        diags.push(make_diagnostic(element));
     }
 }
 
@@ -210,48 +194,15 @@ fn check_html_start_tag(
 fn is_inside_label(node: &Node, source: &str) -> bool {
     let mut current = node.parent();
     while let Some(parent) = current {
-        if parent.kind() == "element" {
-            let mut cursor = parent.walk();
-            for child in parent.children(&mut cursor) {
-                if child.kind() == "start_tag" {
-                    let mut tag_cursor = child.walk();
-                    for tag_child in child.children(&mut tag_cursor) {
-                        if tag_child.kind() == "tag_name" {
-                            let name = &source[tag_child.byte_range()];
-                            if name.eq_ignore_ascii_case("label") {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
+        if parent.kind() == "element"
+            && html_attrs::element_tag_name(&parent, source)
+                .is_some_and(|n| n.eq_ignore_ascii_case("label"))
+        {
+            return true;
         }
         current = parent.parent();
     }
     false
-}
-
-/// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-        }
-    }
-
-    (name, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -613,6 +564,29 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = FormLabel;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = FormLabel;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    // -----------------------------------------------------------------------
+    // Vue
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_vue_bound_aria_label_passes() {
+        let diags = check_vue(r#"<template><input type="text" :aria-label="lbl"></template>"#);
+        assert_eq!(diags.len(), 0, "bound :aria-label labels the input, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_input_without_label_fails() {
+        let diags = check_vue(r#"<template><input type="text"></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     // -----------------------------------------------------------------------

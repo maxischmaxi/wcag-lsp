@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -37,12 +38,7 @@ impl Rule for InputImageAlt {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+        check_html_element(node, source, diagnostics);
     }
 
     // Recurse into children
@@ -52,69 +48,42 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut is_input = false;
+fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
+
+    let is_input =
+        html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("input"));
+    if !is_input {
+        return;
+    }
+
     let mut is_type_image = false;
     let mut has_alt = false;
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("input") {
-                is_input = true;
-            }
+    for attr in html_attrs::attrs(&tag, source) {
+        // A bound `:type` is a runtime expression — we can't tell whether it
+        // resolves to "image", so skip the value check for it.
+        if attr.name_eq("type")
+            && !attr.bound
+            && attr
+                .value
+                .as_deref()
+                .is_some_and(|v| v.eq_ignore_ascii_case("image"))
+        {
+            is_type_image = true;
         }
-        if child.kind() == "attribute" {
-            let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(ref name) = attr_name {
-                if name.eq_ignore_ascii_case("type")
-                    && let Some(ref val) = attr_value
-                    && val.eq_ignore_ascii_case("image")
-                {
-                    is_type_image = true;
-                }
-                if name.eq_ignore_ascii_case("alt") {
-                    has_alt = true;
-                }
-            }
+        // A bound `:alt` still counts as providing an alt attribute.
+        if attr.name_eq("alt") {
+            has_alt = true;
         }
     }
 
-    if is_input && is_type_image && !has_alt {
-        diagnostics.push(make_diagnostic(element_node));
+    if is_type_image && !has_alt {
+        diagnostics.push(make_diagnostic(element));
     }
-}
-
-/// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-            if value.is_none() {
-                value = Some(String::new());
-            }
-        }
-    }
-
-    (name, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +195,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = InputImageAlt;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = InputImageAlt;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_alt_passes() {
+        let diags =
+            check_vue(r#"<template><input type="image" src="submit.png" :alt="label" /></template>"#);
+        assert_eq!(diags.len(), 0, "bound :alt should count as alt, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_image_without_alt_fails() {
+        let diags = check_vue(r#"<template><input type="image" src="submit.png" /></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

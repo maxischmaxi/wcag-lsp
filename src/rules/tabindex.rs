@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -47,29 +48,21 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_attribute(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let mut is_tabindex = false;
-    let mut value: Option<String> = None;
+    let attr = match html_attrs::attr_from_node(node, source) {
+        Some(a) => a,
+        None => return,
+    };
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("tabindex") {
-                is_tabindex = true;
-            }
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-        }
+    if !attr.name_eq("tabindex") {
+        return;
     }
 
-    if is_tabindex
-        && let Some(val) = value
+    // A bound `:tabindex="x"` is a runtime expression — can't validate it.
+    if attr.bound {
+        return;
+    }
+
+    if let Some(val) = attr.value
         && let Ok(n) = val.trim().parse::<i32>()
         && n > 0
     {
@@ -168,6 +161,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = Tabindex;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = Tabindex;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_tabindex_skipped() {
+        // Dynamic value: could be anything at runtime, must not be flagged.
+        let diags = check_vue(r#"<template><div :tabindex="idx"></div></template>"#);
+        assert_eq!(diags.len(), 0, "bound :tabindex should be skipped, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_positive_tabindex_still_fails() {
+        let diags = check_vue(r#"<template><div tabindex="1"></div></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

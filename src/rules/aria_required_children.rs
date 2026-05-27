@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -88,6 +89,14 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    // A bound role (`:role="x"`) is a runtime expression — can't validate it.
+    if html_attrs::element_attrs(element, source)
+        .iter()
+        .any(|a| a.name_eq("role") && a.bound)
+    {
+        return;
+    }
+
     let role = match get_html_role(element, source) {
         Some(r) => r,
         None => return,
@@ -127,84 +136,30 @@ fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagno
 }
 
 fn get_html_role(element: &Node, source: &str) -> Option<String> {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "attribute" {
-                    let (name, value) = extract_html_attribute(&tag_child, source);
-                    if let Some(ref n) = name
-                        && n.eq_ignore_ascii_case("role")
-                    {
-                        return value;
-                    }
-                }
-            }
-        }
-    }
-    None
+    html_attrs::element_attrs(element, source)
+        .into_iter()
+        .find(|a| a.name_eq("role"))
+        .and_then(|a| a.value)
 }
 
 fn get_html_child_role(element: &Node, source: &str) -> Option<String> {
-    // First check for explicit role attribute
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "attribute" {
-                    let (name, value) = extract_html_attribute(&tag_child, source);
-                    if let Some(ref n) = name
-                        && n.eq_ignore_ascii_case("role")
-                    {
-                        return value;
-                    }
-                }
-                if tag_child.kind() == "tag_name" {
-                    let tag_name = source[tag_child.byte_range()].to_lowercase();
-                    if let Some(implicit) = IMPLICIT_ROLES.get(tag_name.as_str()) {
-                        // Check for explicit role first
-                        let mut inner_cursor = child.walk();
-                        for inner_child in child.children(&mut inner_cursor) {
-                            if inner_child.kind() == "attribute" {
-                                let (n, v) = extract_html_attribute(&inner_child, source);
-                                if let Some(ref attr_name) = n
-                                    && attr_name.eq_ignore_ascii_case("role")
-                                {
-                                    return v;
-                                }
-                            }
-                        }
-                        return Some(implicit.to_string());
-                    }
-                }
-            }
+    let attrs = html_attrs::element_attrs(element, source);
+
+    // An explicit role attribute wins. A bound `:role` is unknown at lint time.
+    if let Some(role_attr) = attrs.iter().find(|a| a.name_eq("role")) {
+        if role_attr.bound {
+            return None;
         }
+        return role_attr.value.clone();
+    }
+
+    // Otherwise fall back to the implicit role of the tag name.
+    if let Some(tag) = html_attrs::element_tag_name(element, source)
+        && let Some(implicit) = IMPLICIT_ROLES.get(tag.to_ascii_lowercase().as_str())
+    {
+        return Some(implicit.to_string());
     }
     None
-}
-
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-        }
-    }
-
-    (name, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +370,36 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = AriaRequiredChildren;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = AriaRequiredChildren;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_role_skips_check() {
+        // Parent role is dynamic; we can't know what children it requires.
+        let diags =
+            check_vue(r#"<template><div :role="r"><div>x</div></div></template>"#);
+        assert_eq!(diags.len(), 0, "bound role can't be validated, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_listbox_with_option_passes() {
+        let diags = check_vue(
+            r#"<template><div role="listbox"><div role="option">x</div></div></template>"#,
+        );
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_vue_static_listbox_without_option_fails() {
+        let diags =
+            check_vue(r#"<template><div role="listbox"><div>x</div></div></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

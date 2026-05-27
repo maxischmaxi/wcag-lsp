@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -92,82 +93,20 @@ fn composite_allows(parent_role: &str, child_role: Option<&str>) -> bool {
 // HTML helpers
 // ---------------------------------------------------------------------------
 
-/// Extract the tag name from an HTML element's start_tag or self_closing_tag.
-fn get_html_tag_name<'a>(element: &Node, source: &'a str) -> Option<&'a str> {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "tag_name" {
-                    return Some(&source[tag_child.byte_range()]);
-                }
-            }
-        }
-    }
-    None
+/// The static (non-bound) value of a named attribute on an element. A bound
+/// `:attr`/`v-bind:attr` is a runtime expression and treated as unknown here.
+fn html_static_attr_value(element: &Node, source: &str, attr_name: &str) -> Option<String> {
+    html_attrs::element_attrs(element, source)
+        .into_iter()
+        .find(|a| a.name_eq(attr_name) && !a.bound)
+        .and_then(|a| a.value)
 }
 
-/// Get the value of an HTML attribute by name (case-insensitive).
-fn get_html_attr_value(element: &Node, source: &str, attr_name: &str) -> Option<String> {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "attribute" {
-                    let mut found_name = false;
-                    let mut attr_cursor = tag_child.walk();
-                    for attr_child in tag_child.children(&mut attr_cursor) {
-                        if attr_child.kind() == "attribute_name" {
-                            let name = &source[attr_child.byte_range()];
-                            if name.eq_ignore_ascii_case(attr_name) {
-                                found_name = true;
-                            }
-                        }
-                        if found_name && attr_child.kind() == "quoted_attribute_value" {
-                            let mut val_cursor = attr_child.walk();
-                            for val_child in attr_child.children(&mut val_cursor) {
-                                if val_child.kind() == "attribute_value" {
-                                    return Some(source[val_child.byte_range()].to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Check if an HTML attribute exists on the element (case-insensitive).
-fn has_html_attr(element: &Node, source: &str, attr_name: &str) -> bool {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "attribute" {
-                    let mut attr_cursor = tag_child.walk();
-                    for attr_child in tag_child.children(&mut attr_cursor) {
-                        if attr_child.kind() == "attribute_name" {
-                            let name = &source[attr_child.byte_range()];
-                            if name.eq_ignore_ascii_case(attr_name) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Determine whether an HTML element is interactive.
+/// Determine whether an HTML element is interactive. Bound `:role`/`:tabindex`
+/// values are unknown at lint time, so they are treated conservatively (they do
+/// not, on their own, make an element interactive).
 fn is_html_interactive(element: &Node, source: &str) -> bool {
-    let tag_name = match get_html_tag_name(element, source) {
+    let tag_name = match html_attrs::element_tag_name(element, source) {
         Some(name) => name.to_ascii_lowercase(),
         None => return false,
     };
@@ -180,29 +119,36 @@ fn is_html_interactive(element: &Node, source: &str) -> bool {
         return true;
     }
 
-    // 2. <input> that is NOT type="hidden"
+    let attrs = html_attrs::element_attrs(element, source);
+
+    // 2. <input> that is NOT statically type="hidden". A bound `:type` is
+    //    unknown, so we keep the default (interactive).
     if tag_name == "input" {
-        let type_val = get_html_attr_value(element, source, "type");
-        if let Some(ref val) = type_val
-            && val.eq_ignore_ascii_case("hidden")
-        {
-            return false;
-        }
-        return true;
+        let hidden = attrs.iter().any(|a| {
+            a.name_eq("type")
+                && !a.bound
+                && a.value.as_deref().is_some_and(|v| v.eq_ignore_ascii_case("hidden"))
+        });
+        return !hidden;
     }
 
-    // 3. Has tabindex attribute with a value other than "-1"
-    if has_html_attr(element, source, "tabindex") {
-        let val = get_html_attr_value(element, source, "tabindex");
-        match val {
+    // 3. Has a static tabindex attribute with a value other than "-1".
+    if let Some(tabindex) = attrs.iter().find(|a| a.name_eq("tabindex"))
+        && !tabindex.bound
+    {
+        match tabindex.value.as_deref() {
             Some(v) if v.trim() == "-1" => {}
             _ => return true,
         }
     }
 
-    // 4. Has a role attribute whose value is in INTERACTIVE_ROLES
-    if let Some(role_val) = get_html_attr_value(element, source, "role") {
-        let role = role_val.trim().to_ascii_lowercase();
+    // 4. Has a static role attribute whose value is in INTERACTIVE_ROLES.
+    if let Some(role) = attrs
+        .iter()
+        .find(|a| a.name_eq("role") && !a.bound)
+        .and_then(|a| a.value.as_deref())
+    {
+        let role = role.trim().to_ascii_lowercase();
         if INTERACTIVE_ROLES.iter().any(|r| *r == role) {
             return true;
         }
@@ -211,9 +157,9 @@ fn is_html_interactive(element: &Node, source: &str) -> bool {
     false
 }
 
-/// The explicit interactive ARIA role of an HTML element, if any.
+/// The explicit interactive ARIA role of an HTML element, if any (static only).
 fn html_interactive_role(element: &Node, source: &str) -> Option<String> {
-    let role = get_html_attr_value(element, source, "role")?;
+    let role = html_static_attr_value(element, source, "role")?;
     let r = role.trim().to_ascii_lowercase();
     INTERACTIVE_ROLES.iter().any(|x| *x == r).then_some(r)
 }
@@ -226,7 +172,7 @@ fn html_interactive_identity(element: &Node, source: &str) -> Option<String> {
         return None;
     }
     html_interactive_role(element, source)
-        .or_else(|| get_html_tag_name(element, source).map(|t| t.to_ascii_lowercase()))
+        .or_else(|| html_attrs::element_tag_name(element, source).map(|t| t.to_ascii_lowercase()))
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +435,27 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = NestedInteractive;
         rule.check(&tree.root_node(), source, FileType::Html)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = NestedInteractive;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_button_with_anchor_fails() {
+        let diags = check_vue(r#"<template><button><a href="/">x</a></button></template>"#);
+        assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn test_vue_bound_role_child_not_flagged() {
+        // A bound `:role` child is unknown at lint time -> no false positive.
+        let diags =
+            check_vue(r#"<template><button><div :role="r">x</div></button></template>"#);
+        assert_eq!(diags.len(), 0, "bound role is unknown, got: {diags:?}");
     }
 
     fn check_tsx(source: &str) -> Vec<Diagnostic> {

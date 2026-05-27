@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -43,85 +44,22 @@ impl Rule for AriaHiddenFocus {
 // HTML helpers
 // ---------------------------------------------------------------------------
 
-/// Extract the tag name from an HTML element's start_tag or self_closing_tag.
-fn get_html_tag_name<'a>(element: &Node, source: &'a str) -> Option<&'a str> {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "tag_name" {
-                    return Some(&source[tag_child.byte_range()]);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Get the value of an HTML attribute by name (case-insensitive) from an element node.
-fn get_html_attr_value(element: &Node, source: &str, attr_name: &str) -> Option<String> {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "attribute" {
-                    let mut found_name = false;
-                    let mut attr_cursor = tag_child.walk();
-                    for attr_child in tag_child.children(&mut attr_cursor) {
-                        if attr_child.kind() == "attribute_name" {
-                            let name = &source[attr_child.byte_range()];
-                            if name.eq_ignore_ascii_case(attr_name) {
-                                found_name = true;
-                            }
-                        }
-                        if found_name && attr_child.kind() == "quoted_attribute_value" {
-                            let mut val_cursor = attr_child.walk();
-                            for val_child in attr_child.children(&mut val_cursor) {
-                                if val_child.kind() == "attribute_value" {
-                                    return Some(source[val_child.byte_range()].to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Check if an HTML attribute exists on the element (case-insensitive).
-fn has_html_attr(element: &Node, source: &str, attr_name: &str) -> bool {
-    let mut cursor = element.walk();
-    for child in element.children(&mut cursor) {
-        if child.kind() == "start_tag" || child.kind() == "self_closing_tag" {
-            let mut tag_cursor = child.walk();
-            for tag_child in child.children(&mut tag_cursor) {
-                if tag_child.kind() == "attribute" {
-                    let mut attr_cursor = tag_child.walk();
-                    for attr_child in tag_child.children(&mut attr_cursor) {
-                        if attr_child.kind() == "attribute_name" {
-                            let name = &source[attr_child.byte_range()];
-                            if name.eq_ignore_ascii_case(attr_name) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
+/// The static (non-bound) value of an attribute on an element, if present.
+/// Bound attributes (`:foo`) hold a runtime expression, not a literal value.
+fn html_static_attr_value(element: &Node, source: &str, attr_name: &str) -> Option<String> {
+    html_attrs::element_attrs(element, source)
+        .into_iter()
+        .find(|a| a.name_eq(attr_name) && !a.bound)
+        .and_then(|a| a.value)
 }
 
 /// Determine whether an HTML element is focusable.
 fn is_html_focusable(element: &Node, source: &str) -> bool {
-    let tag_name = match get_html_tag_name(element, source) {
+    let tag_name = match html_attrs::element_tag_name(element, source) {
         Some(name) => name.to_ascii_lowercase(),
         None => return false,
     };
+    let attrs = html_attrs::element_attrs(element, source);
 
     // 1. Natively focusable tags (button, select, textarea, iframe)
     if FOCUSABLE_TAGS
@@ -131,14 +69,14 @@ fn is_html_focusable(element: &Node, source: &str) -> bool {
         return true;
     }
 
-    // 2. <a> with href attribute
-    if tag_name == "a" && has_html_attr(element, source, "href") {
+    // 2. <a> with href attribute (bound `:href` still provides an href)
+    if tag_name == "a" && attrs.iter().any(|a| a.name_eq("href")) {
         return true;
     }
 
     // 3. <input> that is NOT type="hidden"
     if tag_name == "input" {
-        let type_val = get_html_attr_value(element, source, "type");
+        let type_val = html_static_attr_value(element, source, "type");
         if let Some(ref val) = type_val
             && val.eq_ignore_ascii_case("hidden")
         {
@@ -147,10 +85,14 @@ fn is_html_focusable(element: &Node, source: &str) -> bool {
         return true;
     }
 
-    // 4. Has tabindex attribute with value NOT "-1"
-    if has_html_attr(element, source, "tabindex") {
-        let val = get_html_attr_value(element, source, "tabindex");
-        match val {
+    // 4. Has tabindex attribute with value NOT "-1". A bound `:tabindex` is a
+    //    runtime expression: we cannot tell whether it is focusable, so we stay
+    //    conservative and do not treat it as focusable (no false positives).
+    if let Some(tabindex) = attrs.iter().find(|a| a.name_eq("tabindex")) {
+        if tabindex.bound {
+            return false;
+        }
+        match tabindex.value.as_deref() {
             Some(v) if v.trim() == "-1" => return false,
             _ => return true,
         }
@@ -165,8 +107,10 @@ fn is_html_focusable(element: &Node, source: &str) -> bool {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        // Check if this element has aria-hidden="true"
-        if let Some(val) = get_html_attr_value(node, source, "aria-hidden")
+        // Check if this element has a static aria-hidden="true". A bound
+        // `:aria-hidden` is a runtime expression, so we cannot assume it hides
+        // the subtree — skip the aria-hidden side in that case.
+        if let Some(val) = html_static_attr_value(node, source, "aria-hidden")
             && val == "true"
         {
             // Check all descendants for focusable elements
@@ -191,8 +135,9 @@ fn check_html_descendants_for_focusable(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "element" {
-            // Check if this child has aria-hidden="false" (overrides parent)
-            if let Some(val) = get_html_attr_value(&child, source, "aria-hidden")
+            // A static aria-hidden="false" overrides the parent. A bound
+            // `:aria-hidden` is dynamic and does not reliably override.
+            if let Some(val) = html_static_attr_value(&child, source, "aria-hidden")
                 && val == "false"
             {
                 // Skip this subtree entirely
@@ -461,6 +406,35 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = AriaHiddenFocus;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = AriaHiddenFocus;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_aria_hidden_not_flagged() {
+        // `:aria-hidden` is dynamic: we cannot assume the subtree is hidden, so
+        // the focusable button inside must not be flagged.
+        let diags = check_vue(
+            r#"<template><div :aria-hidden="hidden"><button>Click</button></div></template>"#,
+        );
+        assert_eq!(diags.len(), 0, "bound :aria-hidden must not flag, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_aria_hidden_with_button_fails() {
+        let diags = check_vue(
+            r#"<template><div aria-hidden="true"><button>Click</button></div></template>"#,
+        );
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("aria-hidden-focus".to_string()))
+        );
     }
 
     #[test]

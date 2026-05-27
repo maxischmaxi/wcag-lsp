@@ -1,5 +1,6 @@
 use crate::engine::node_to_range;
 use crate::parser::FileType;
+use crate::rules::html_attrs;
 use crate::rules::{Rule, RuleMetadata, Severity, WcagLevel};
 use tower_lsp_server::ls_types::*;
 use tree_sitter::Node;
@@ -41,12 +42,7 @@ impl Rule for NoRedundantAlt {
 
 fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "element" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "start_tag" {
-                check_html_start_tag(&child, source, diagnostics, node);
-            }
-        }
+        check_html_element(node, source, diagnostics);
     }
 
     // Recurse into children
@@ -56,67 +52,36 @@ fn visit_html(node: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_html_start_tag(
-    start_tag: &Node,
-    source: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-    element_node: &Node,
-) {
-    let mut is_img = false;
-    let mut alt_value: Option<String> = None;
+fn check_html_element(element: &Node, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let tag = match html_attrs::element_tag(element) {
+        Some(t) => t,
+        None => return,
+    };
 
-    let mut cursor = start_tag.walk();
-    for child in start_tag.children(&mut cursor) {
-        if child.kind() == "tag_name" {
-            let name = &source[child.byte_range()];
-            if name.eq_ignore_ascii_case("img") {
-                is_img = true;
-            }
-        }
-        if child.kind() == "attribute" {
-            let (attr_name, attr_value) = extract_html_attribute(&child, source);
-            if let Some(name) = attr_name
-                && name.eq_ignore_ascii_case("alt")
-            {
-                alt_value = attr_value;
-            }
-        }
+    let is_img =
+        html_attrs::tag_name(&tag, source).is_some_and(|n| n.eq_ignore_ascii_case("img"));
+    if !is_img {
+        return;
     }
 
-    if is_img
-        && let Some(ref alt) = alt_value
-        && !alt.is_empty()
-        && contains_redundant_word(alt)
+    let alt = match html_attrs::attrs(&tag, source).into_iter().find(|a| a.name_eq("alt")) {
+        Some(a) => a,
+        None => return, // No alt attribute → handled by img-alt rule, not this one
+    };
+
+    // A bound `:alt`/`v-bind:alt` is a runtime expression — don't inspect its
+    // text for redundant words.
+    if alt.bound {
+        return;
+    }
+
+    if let Some(ref value) = alt.value
+        && !value.is_empty()
+        && contains_redundant_word(value)
     {
-        diagnostics.push(make_diagnostic(element_node));
+        diagnostics.push(make_diagnostic(element));
     }
-    // No alt attribute or empty alt → handled by img-alt rule, not this one
-}
-
-/// Extract (attribute_name, Option<attribute_value>) from an HTML attribute node.
-fn extract_html_attribute(attr_node: &Node, source: &str) -> (Option<String>, Option<String>) {
-    let mut name = None;
-    let mut value = None;
-
-    let mut cursor = attr_node.walk();
-    for child in attr_node.children(&mut cursor) {
-        if child.kind() == "attribute_name" {
-            name = Some(source[child.byte_range()].to_string());
-        }
-        if child.kind() == "quoted_attribute_value" {
-            let mut val_cursor = child.walk();
-            for val_child in child.children(&mut val_cursor) {
-                if val_child.kind() == "attribute_value" {
-                    value = Some(source[val_child.byte_range()].to_string());
-                }
-            }
-            if value.is_none() {
-                value = Some(String::new());
-            }
-        }
-    }
-
-    (name, value)
+    // Empty alt → handled by img-alt rule, not this one
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +240,26 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = NoRedundantAlt;
         rule.check(&tree.root_node(), source, FileType::Tsx)
+    }
+
+    fn check_vue(source: &str) -> Vec<Diagnostic> {
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let rule = NoRedundantAlt;
+        rule.check(&tree.root_node(), source, FileType::Vue)
+    }
+
+    #[test]
+    fn test_vue_bound_alt_skipped() {
+        // The expression text contains "image" but it's a runtime value, not literal alt text.
+        let diags = check_vue(r#"<template><img :alt="imageLabel" src="cat.jpg" /></template>"#);
+        assert_eq!(diags.len(), 0, "bound :alt must not be inspected, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_vue_static_redundant_alt_still_fails() {
+        let diags = check_vue(r#"<template><img alt="image of a cat" src="cat.jpg" /></template>"#);
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

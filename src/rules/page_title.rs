@@ -21,8 +21,9 @@ impl Rule for PageTitle {
     }
 
     fn check(&self, root: &Node, source: &str, file_type: FileType) -> Vec<Diagnostic> {
-        // This rule is HTML-only; JSX components don't define document titles this way.
-        if file_type.is_jsx_like() {
+        // Document-level rule: a page title only makes sense for full documents,
+        // not for component/template fragments (JSX, Vue SFC, Svelte).
+        if file_type.is_fragment() {
             return Vec::new();
         }
 
@@ -160,6 +161,17 @@ mod tests {
         let tree = parser.parse(source, None).unwrap();
         let rule = PageTitle;
         let diags = rule.check(&tree.root_node(), source, FileType::Tsx);
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn test_vue_sfc_fragment_returns_empty() {
+        // A Vue SFC template is a fragment, not a document — no title expected.
+        let mut parser = parser::create_parser(FileType::Vue).unwrap();
+        let source = r#"<template><div>Hello</div></template>"#;
+        let tree = parser.parse(source, None).unwrap();
+        let rule = PageTitle;
+        let diags = rule.check(&tree.root_node(), source, FileType::Vue);
         assert_eq!(diags.len(), 0);
     }
 }

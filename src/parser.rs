@@ -44,6 +44,16 @@ impl FileType {
     pub fn is_jsx_like(&self) -> bool {
         matches!(self, FileType::Jsx | FileType::Tsx)
     }
+
+    /// Component/template file types that represent a fragment of a page rather
+    /// than a full HTML document. Document-level rules (e.g. page-title, which
+    /// requires a `<title>` to exist) don't apply to these.
+    pub fn is_fragment(&self) -> bool {
+        matches!(
+            self,
+            FileType::Jsx | FileType::Tsx | FileType::Vue | FileType::Svelte
+        )
+    }
 }
 
 pub fn create_parser(file_type: FileType) -> Option<Parser> {
